@@ -1,17 +1,3 @@
-
-
----
-
-layout: post 
-
-title:  "YOLOv3代码学习笔记" 
-
-date:   2021-02-01 13:23:08 +0800 
-
-categories: jekyll update
-
----
-
 ###  YOLOv3 上手
 
 这是对视频进行预测的效果
@@ -20,31 +6,17 @@ categories: jekyll update
 
 主要是为了能够确定就算是没有能力完全读懂YOLO的源码、写不出YOLO的pytorch实现，起码能够使用开源的代码训练师兄提供的数据集以及基于数据集进行正确的推理。
 
-原谅我对于github上的一些源代码的下载、编译、部署、环境配置还有些不熟悉，因此虽然也找到了很优秀的开源YOLOv5代码，但是却不知道该怎么训练和检测
+![image-20210201175048003](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210201175202.png)
 
-[ultralytics/yolov5: YOLOv5 in PyTorch > ONNX > CoreML > TFLite (github.com)](https://github.com/ultralytics/yolov5)
+
+
+
+
+### YOLOv5 上手
 
 [Home · ultralytics/yolov5 Wiki (github.com)](https://github.com/ultralytics/yolov5/wiki)
 
-[Load YOLOv5 from PyTorch Hub ⭐ · Issue #36 · ultralytics/yolov5 (github.com)](https://github.com/ultralytics/yolov5/issues/36)
-
-[ultralytics/yolov5: YOLOv5 in PyTorch > ONNX > CoreML > TFLite (github.com)](https://github.com/ultralytics/yolov5#pretrained-checkpoints)
-
-[Train Custom Data · ultralytics/yolov5 Wiki (github.com)](https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data)
-
-[YOLOv5 Tutorial - Colaboratory (google.com)](https://colab.research.google.com/github/ultralytics/yolov5/blob/master/tutorial.ipynb#scrollTo=Zelyeqbyt3GD)
-
-[www.kaggle.com](https://www.kaggle.com/ultralytics/yolov5-ultralytics/data)
-
-[Docker Hub](https://hub.docker.com/r/ultralytics/yolov5)
-
-[YOLO: Real-Time Object Detection (pjreddie.com)](https://pjreddie.com/darknet/yolo/)
-
-![2021-01-30](C:\Users\zjnyl\OneDrive\图片\屏幕快照\2021-01-30.png)
-
-
-
-
+![img](https://docimg10.docs.qq.com/image/qthraNPmzbUbUV8dEzDbnQ?w=1605&h=1022)
 
 ###  YOLOv3源码阅读
 
