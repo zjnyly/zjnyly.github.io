@@ -1,0 +1,1903 @@
+
+
+---
+
+layout: post 
+
+title:  "YOLOv3代码学习笔记" 
+
+date:   2021-02-01 13:23:08 +0800 
+
+categories: jekyll update
+
+---
+
+###  YOLOv3 上手
+
+这是对视频进行预测的效果
+
+调用的是预训练好的模型，我的电脑没有GPU，使用CPU训练太慢，因此就直接使用了训练好的模型进行推理。
+
+主要是为了能够确定就算是没有能力完全读懂YOLO的源码、写不出YOLO的pytorch实现，起码能够使用开源的代码训练师兄提供的数据集以及基于数据集进行正确的推理。
+
+原谅我对于github上的一些源代码的下载、编译、部署、环境配置还有些不熟悉，因此虽然也找到了很优秀的开源YOLOv5代码，但是却不知道该怎么训练和检测
+
+[ultralytics/yolov5: YOLOv5 in PyTorch > ONNX > CoreML > TFLite (github.com)](https://github.com/ultralytics/yolov5)
+
+[Home · ultralytics/yolov5 Wiki (github.com)](https://github.com/ultralytics/yolov5/wiki)
+
+[Load YOLOv5 from PyTorch Hub ⭐ · Issue #36 · ultralytics/yolov5 (github.com)](https://github.com/ultralytics/yolov5/issues/36)
+
+[ultralytics/yolov5: YOLOv5 in PyTorch > ONNX > CoreML > TFLite (github.com)](https://github.com/ultralytics/yolov5#pretrained-checkpoints)
+
+[Train Custom Data · ultralytics/yolov5 Wiki (github.com)](https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data)
+
+[YOLOv5 Tutorial - Colaboratory (google.com)](https://colab.research.google.com/github/ultralytics/yolov5/blob/master/tutorial.ipynb#scrollTo=Zelyeqbyt3GD)
+
+[www.kaggle.com](https://www.kaggle.com/ultralytics/yolov5-ultralytics/data)
+
+[Docker Hub](https://hub.docker.com/r/ultralytics/yolov5)
+
+[YOLO: Real-Time Object Detection (pjreddie.com)](https://pjreddie.com/darknet/yolo/)
+
+![2021-01-30](C:\Users\zjnyl\OneDrive\图片\屏幕快照\2021-01-30.png)
+
+
+
+
+
+###  YOLOv3源码阅读
+
+源码地址：https://github.com/bubbliiiing/yolo3-pytorch
+
+大家都说python简单，我一开始看了python的入门书也觉得简单，但是当我实际想阅读python的代码的时候我却发现并不是这样。
+
+python的语法特性太多、太高端了，各种很pythonic的操作琳琅满目，再加上我不太熟悉numpy的矩阵操作和pytorch的函数的调用，因此阅读和理解YOLOv3的源码有些吃力。
+
+python还有一点让我一时难以转换思维就是变量不需要声明就可以直接使用，这一点和C/C++截然不同。
+
+#### 一、YOLOv3主干网络的搭建
+
+<img src="https://raw.githubusercontent.com/zjnyly/blog/main/img/20210131103325.jpeg" alt="YOLOv3主干网络" style="zoom:50%;" />
+
+#### 1. DarkNet的搭建
+
+##### [1] darknet.py
+
+```python
+import math
+from collections import OrderedDict
+
+import torch
+import torch.nn as nn
+
+
+#---------------------------------------------------------------------#
+#   残差结构
+#   利用一个1x1卷积下降通道数，然后利用一个3x3卷积提取特征并且上升通道数
+#   最后接上一个残差边
+#---------------------------------------------------------------------#
+class BasicBlock(nn.Module):
+    def __init__(self, inplanes, planes):
+        super(BasicBlock, self).__init__()
+        self.conv1 = nn.Conv2d(inplanes, planes[0], kernel_size=1,
+                               stride=1, padding=0, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes[0])
+        self.relu1 = nn.LeakyReLU(0.1)
+        
+        self.conv2 = nn.Conv2d(planes[0], planes[1], kernel_size=3,
+                               stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes[1])
+        self.relu2 = nn.LeakyReLU(0.1)
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+
+        out += residual
+        return out
+
+
+class DarkNet(nn.Module):
+    def __init__(self, layers):
+        super(DarkNet, self).__init__()
+        self.inplanes = 32
+        # 416,416,3 -> 416,416,32
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.inplanes)
+        self.relu1 = nn.LeakyReLU(0.1)
+
+        # 416,416,32 -> 208,208,64
+        self.layer1 = self._make_layer([32, 64], layers[0])
+        # 208,208,64 -> 104,104,128
+        self.layer2 = self._make_layer([64, 128], layers[1])
+        # 104,104,128 -> 52,52,256
+        self.layer3 = self._make_layer([128, 256], layers[2])
+        # 52,52,256 -> 26,26,512
+        self.layer4 = self._make_layer([256, 512], layers[3])
+        # 26,26,512 -> 13,13,1024
+        self.layer5 = self._make_layer([512, 1024], layers[4])
+
+        self.layers_out_filters = [64, 128, 256, 512, 1024]
+
+        # 进行权值初始化
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+    #---------------------------------------------------------------------#
+    #   在每一个layer里面，首先利用一个步长为2的3x3卷积进行下采样
+    #   然后进行残差结构的堆叠
+    #---------------------------------------------------------------------#
+    def _make_layer(self, planes, blocks):
+        layers = []
+        # 下采样，步长为2，卷积核大小为3
+        layers.append(("ds_conv", nn. Conv2d(self.inplanes, planes[1], kernel_size=3,
+                                stride=2, padding=1, bias=False)))
+        layers.append(("ds_bn", nn.BatchNorm2d(planes[1])))
+        layers.append(("ds_relu", nn.LeakyReLU(0.1)))
+        # 加入残差结构
+        self.inplanes = planes[1]
+        for i in range(0, blocks):
+            layers.append(("residual_{}".format(i), BasicBlock(self.inplanes, planes)))
+        return nn.Sequential(OrderedDict(layers))
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        out3 = self.layer3(x)
+        out4 = self.layer4(out3)
+        out5 = self.layer5(out4)
+
+        return out3, out4, out5
+
+def darknet53(pretrained, **kwargs):
+    model = DarkNet([1, 2, 8, 8, 4])
+    if pretrained:
+        if isinstance(pretrained, str):
+            model.load_state_dict(torch.load(pretrained))
+        else:
+            raise Exception("darknet request a pretrained path. got [{}]".format(pretrained))
+    return model
+
+```
+
+##### [2] DarkNet类的初始化
+
+```python
+class DarkNet(nn.Module):
+    def __init__(self, layers):
+        super(DarkNet, self).__init__()
+        self.inplanes = 32
+        # 416,416,3 -> 416,416,32
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.inplanes)
+        self.relu1 = nn.LeakyReLU(0.1)
+
+        # 416,416,32 -> 208,208,64
+        self.layer1 = self._make_layer([32, 64], layers[0])
+        # 208,208,64 -> 104,104,128
+        self.layer2 = self._make_layer([64, 128], layers[1])
+        # 104,104,128 -> 52,52,256
+        self.layer3 = self._make_layer([128, 256], layers[2])
+        # 52,52,256 -> 26,26,512
+        self.layer4 = self._make_layer([256, 512], layers[3])
+        # 26,26,512 -> 13,13,1024
+        self.layer5 = self._make_layer([512, 1024], layers[4])
+
+        self.layers_out_filters = [64, 128, 256, 512, 1024]
+
+        # 进行权值初始化
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+```
+
+首先看
+
+```python
+class DarkNet(nn.Module):
+    def __init__(self, layers):
+        super(DarkNet, self).__init__()
+        self.inplanes = 32
+        # 416,416,3 -> 416,416,32
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.inplanes)
+        self.relu1 = nn.LeakyReLU(0.1)
+```
+
+DarkNet类继承自父类nn.Module
+
+通过
+
+```python
+super(DarkNet, self).__init__()
+```
+
+使用父类方法。
+
+***
+
+```python
+# 416,416,3 -> 416,416,32
+self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+self.bn1 = nn.BatchNorm2d(self.inplanes)
+self.relu1 = nn.LeakyReLU(0.1)
+```
+
+首先，对张量进行第一次卷积、BN和输入激活函数。
+
+```python
+self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+```
+
+卷积的参数依次为：张量的初始通道，卷积后的通道数，卷积核的大小，步长，池化的大小和是否偏置。
+
+这里的步长为1，池化为1，因此不会影响张量的H和W。
+
+```python
+self.bn1 = nn.BatchNorm2d(self.inplanes)
+self.relu1 = nn.LeakyReLU(0.1)
+```
+
+用来生成其他两个层，要注意这些层都只是类似一种声明，最后添加到一个类似树的结构中，然后通过深度优先遍历对每个层的参数进行初始化。
+
+这里用到的激活函数是LeakyReLU，激活函数的作用是使得分类不会太过于线性
+
+<img src="https://github.com/zjnyly/blog/blob/main/img/20210131113344.png?raw=true" alt="20210131113344.png" style="zoom: 50%;" />
+
+线性的激活函数可以正确的区分二者，但是却无法区分以下的种类
+
+<img src="https://github.com/zjnyly/blog/blob/main/img/20210131113327.png?raw=true" alt="20210131113327.png" style="zoom:50%;" />
+
+因此需要非线性的激活函数
+
+如果使用Sigmoid激活函数
+$$
+S(x)=\frac{1}{1+e^{-x}}
+$$
+![img](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210131115125.webp)
+
+其导数为
+
+![img](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210131124913.webp)
+
+当节点的参数偏移了x=0以后，就收敛到0，这种情况下，会导致梯度消失的情况。
+
+梯度消失的情况在输入层最为严重，如果输入层参数位于激活函数的位置的梯度消失，那么再多的数据集也很难有效地训练隐藏层。
+
+主要的解决梯度消失问题的方法是（就我目前所知）
+
+* 使用其他类型的激活函数（LeakyReLU)
+* 添加BN层
+* 引入残差网络
+
+这里的LeakyReLU的函数图像为
+
+<img src="https://github.com/zjnyly/blog/blob/main/img/20210131114958.jpeg?raw=true" alt="20210131114958.jpeg" style="zoom:33%;" />
+
+![20210131114956.jpeg](https://github.com/zjnyly/blog/blob/main/img/20210131114956.jpeg?raw=true)
+
+***
+
+
+
+```python
+ # 416,416,32 -> 208,208,64
+ self.layer1 = self._make_layer([32, 64], layers[0])
+ # 208,208,64 -> 104,104,128
+ self.layer2 = self._make_layer([64, 128], layers[1])
+ # 104,104,128 -> 52,52,256
+ self.layer3 = self._make_layer([128, 256], layers[2])
+ # 52,52,256 -> 26,26,512
+ self.layer4 = self._make_layer([256, 512], layers[3])
+ # 26,26,512 -> 13,13,1024
+ self.layer5 = self._make_layer([512, 1024], layers[4])
+```
+
+接着就是添加DarkNet中的残差网络的部分
+
+调用的
+
+```python
+self._make_layer([32, 64], layers[0])
+```
+
+的函数定义为
+
+```python
+def _make_layer(self, planes, blocks):
+        layers = []
+        # 下采样，步长为2，卷积核大小为3
+        layers.append(("ds_conv", nn. Conv2d(self.inplanes, planes[1], kernel_size=3,
+                                stride=2, padding=1, bias=False)))
+        layers.append(("ds_bn", nn.BatchNorm2d(planes[1])))
+        layers.append(("ds_relu", nn.LeakyReLU(0.1)))
+        # 加入残差结构
+        self.inplanes = planes[1]
+        for i in range(0, blocks):
+            layers.append(("residual_{}".format(i), BasicBlock(self.inplanes, planes)))
+        return nn.Sequential(OrderedDict(layers))
+```
+
+首先声明了一个列表layer，接着按照之前的方式向列表追加网络中的层。
+
+要注意向layer追加的时候，是将名称和层组合成键值对的形式，然后构成元组追加到layer之中。
+
+***
+
+##### [3]残差网络
+
+到了残差层的搭建的模块，可以看到调用了BasicBlock的构造函数
+
+```python
+layers.append(("residual_{}".format(i), BasicBlock(self.inplanes, planes)))
+```
+
+```python
+class BasicBlock(nn.Module):
+    def __init__(self, inplanes, planes):
+        super(BasicBlock, self).__init__()
+        self.conv1 = nn.Conv2d(inplanes, planes[0], kernel_size=1,
+                               stride=1, padding=0, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes[0])
+        self.relu1 = nn.LeakyReLU(0.1)
+        
+        self.conv2 = nn.Conv2d(planes[0], planes[1], kernel_size=3,
+                               stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes[1])
+        self.relu2 = nn.LeakyReLU(0.1)
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+
+        out += residual
+        return out
+```
+
+其中初始化模块和DarkNet类似
+
+```python
+def __init__(self, inplanes, planes):
+        super(BasicBlock, self).__init__()
+        self.conv1 = nn.Conv2d(inplanes, planes[0], kernel_size=1,
+                               stride=1, padding=0, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes[0])
+        self.relu1 = nn.LeakyReLU(0.1)
+        
+        self.conv2 = nn.Conv2d(planes[0], planes[1], kernel_size=3,
+                               stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes[1])
+        self.relu2 = nn.LeakyReLU(0.1)
+```
+
+按照残差网络的连接方式连接（通过设置forward函数）
+
+![img](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210131132647.webp)
+
+```python
+def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+
+        out += residual
+        return out
+```
+
+可以直接用out将所有层串起来，但是要记得加上残差。
+
+**这个forward机制我有些搞不懂，到时候再仔细研究一下，看起来就是在继承了nn.Module的父类以后，需要初始化声明有几种网络，然后再在forward函数中将这几个层用一个或多个变量串起来，最后实际上不需要保存整个网络的中间结果，只需要简单的输入输出就好了。父类中应该有一定的方法将这整个网络组织起来。**
+
+最后回到
+
+```python
+def _make_layer(self, planes, blocks):
+        layers = []
+        # 下采样，步长为2，卷积核大小为3
+        layers.append(("ds_conv", nn. Conv2d(self.inplanes, planes[1], kernel_size=3,
+                                stride=2, padding=1, bias=False)))
+        layers.append(("ds_bn", nn.BatchNorm2d(planes[1])))
+        layers.append(("ds_relu", nn.LeakyReLU(0.1)))
+        # 加入残差结构
+        self.inplanes = planes[1]
+        for i in range(0, blocks):
+            layers.append(("residual_{}".format(i), BasicBlock(self.inplanes, planes)))
+        return nn.Sequential(OrderedDict(layers))
+```
+
+最后的返回调用了两个函数
+
+```python
+ return nn.Sequential(OrderedDict(layers))
+```
+
+首先是OrderedDict函数，作用是将layer中的（元组），也即dict中的键值对按顺序排列好，避免出现residual_2在residual_1前面的情况
+
+然后是
+
+nn.Sequential()函数的定义是
+
+>A sequential container. Modules will be added to it in the order they are passed in the constructor. Alternatively, an ordered dict of modules can also be passed in.
+>
+>一个有序的容器，神经网络模块将按照在传入构造器的顺序依次被添加到计算图中执行，同时以神经网络模块为元素的有序字典也可以作为传入参数。
+
+因此通过其构建整个网络。
+
+***
+
+然后又回到
+
+```python
+class DarkNet(nn.Module):
+    def __init__(self, layers):
+        super(DarkNet, self).__init__()
+        self.inplanes = 32
+        # 416,416,3 -> 416,416,32
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.inplanes)
+        self.relu1 = nn.LeakyReLU(0.1)
+
+        # 416,416,32 -> 208,208,64
+        self.layer1 = self._make_layer([32, 64], layers[0])
+        # 208,208,64 -> 104,104,128
+        self.layer2 = self._make_layer([64, 128], layers[1])
+        # 104,104,128 -> 52,52,256
+        self.layer3 = self._make_layer([128, 256], layers[2])
+        # 52,52,256 -> 26,26,512
+        self.layer4 = self._make_layer([256, 512], layers[3])
+        # 26,26,512 -> 13,13,1024
+        self.layer5 = self._make_layer([512, 1024], layers[4])
+
+        self.layers_out_filters = [64, 128, 256, 512, 1024]
+
+        # 进行权值初始化
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+```
+
+最后有一个
+
+```python
+# 进行权值初始化
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+```
+
+用来初始化整个网络的参数
+
+```python
+for m in self.modules()
+```
+
+用来遍历整个网络中各个层，按照我之前的说法，层与层之间的连接方式用类似树的数据结构保存起来，因此self.modules()就是一个可以按照深度优先遍历每个层然后返回该层的函数
+
+然后
+
+```python
+isinstance(m, nn.Conv2d):
+```
+
+是用来判断第一个参数的类型是否和第二个参数的类型一致的
+
+如果是卷积层，那么按照卷积层的方式初始化参数，否则如果是BN层，就按照BN层的方式初始化
+
+**不过我不太了解具体的初始化方式，到时候再仔细看看**
+
+***
+
+然后就是DarkNet的forward函数
+
+```python
+def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        out3 = self.layer3(x)
+        out4 = self.layer4(out3)
+        out5 = self.layer5(out4)
+
+        return out3, out4, out5
+```
+
+最后不是全部用x串起来，因为需要引出三个张量数据组件YOLO的三种类型的输出网络。
+
+不禁感慨一下，python的语法特性真的很好，可以直接返回三个变量。
+
+****
+
+最后还有一个函数
+
+```python
+def darknet53(pretrained, **kwargs):
+    model = DarkNet([1, 2, 8, 8, 4])
+    if pretrained:
+        if isinstance(pretrained, str):
+            model.load_state_dict(torch.load(pretrained))
+        else:
+            raise Exception("darknet request a pretrained path. got [{}]".format(pretrained))
+    return model
+```
+
+用来实例化一个DarkNet，model的类型为是网络类型（nn.Module,也许吧，我还得仔细看看）
+
+然后需要载入预训练的模型，使用torch.load()载入
+
+model.load_state_dict()装载字典类型？大概是这样吧，然后返回model也即pytorch定义的网络类。
+
+
+
+#### 2. 输出网络的搭建
+
+```python
+from collections import OrderedDict
+
+import torch
+import torch.nn as nn
+
+from nets.darknet import darknet53
+
+
+def conv2d(filter_in, filter_out, kernel_size):
+    pad = (kernel_size - 1) // 2 if kernel_size else 0
+    return nn.Sequential(OrderedDict([
+        ("conv", nn.Conv2d(filter_in, filter_out, kernel_size=kernel_size, stride=1, padding=pad, bias=False)),
+        ("bn", nn.BatchNorm2d(filter_out)),
+        ("relu", nn.LeakyReLU(0.1)),
+    ]))
+
+#------------------------------------------------------------------------#
+#   make_last_layers里面一共有七个卷积，前五个用于提取特征。
+#   后两个用于获得yolo网络的预测结果
+#------------------------------------------------------------------------#
+def make_last_layers(filters_list, in_filters, out_filter):
+    m = nn.ModuleList([
+        conv2d(in_filters, filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        nn.Conv2d(filters_list[1], out_filter, kernel_size=1,
+                                        stride=1, padding=0, bias=True)
+    ])
+    return m
+
+class YoloBody(nn.Module):
+    def __init__(self, config):
+        super(YoloBody, self).__init__()
+        self.config = config
+        #---------------------------------------------------#   
+        #   生成darknet53的主干模型
+        #   获得三个有效特征层，他们的shape分别是：
+        #   52,52,256
+        #   26,26,512
+        #   13,13,1024
+        #---------------------------------------------------#
+        self.backbone = darknet53(None)
+
+        # out_filters : [64, 128, 256, 512, 1024]
+        out_filters = self.backbone.layers_out_filters
+
+        #------------------------------------------------------------------------#
+        #   计算yolo_head的输出通道数，对于voc数据集而言
+        #   final_out_filter0 = final_out_filter1 = final_out_filter2 = 75
+        #------------------------------------------------------------------------#
+        final_out_filter0 = len(config["yolo"]["anchors"][0]) * (5 + config["yolo"]["classes"])
+        self.last_layer0 = make_last_layers([512, 1024], out_filters[-1], final_out_filter0)
+
+        final_out_filter1 = len(config["yolo"]["anchors"][1]) * (5 + config["yolo"]["classes"])
+        self.last_layer1_conv = conv2d(512, 256, 1)
+        self.last_layer1_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.last_layer1 = make_last_layers([256, 512], out_filters[-2] + 256, final_out_filter1)
+
+        final_out_filter2 = len(config["yolo"]["anchors"][2]) * (5 + config["yolo"]["classes"])
+        self.last_layer2_conv = conv2d(256, 128, 1)
+        self.last_layer2_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.last_layer2 = make_last_layers([128, 256], out_filters[-3] + 128, final_out_filter2)
+
+
+    def forward(self, x):
+        def _branch(last_layer, layer_in):
+            for i, e in enumerate(last_layer):
+                layer_in = e(layer_in)
+                if i == 4:
+                    out_branch = layer_in
+            return layer_in, out_branch
+        #---------------------------------------------------#   
+        #   获得三个有效特征层，他们的shape分别是：
+        #   52,52,256；26,26,512；13,13,1024
+        #---------------------------------------------------#
+        x2, x1, x0 = self.backbone(x)
+
+        #---------------------------------------------------#
+        #   第一个特征层
+        #   out0 = (batch_size,255,13,13)
+        #---------------------------------------------------#
+        # 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512
+        out0, out0_branch = _branch(self.last_layer0, x0)
+
+        # 13,13,512 -> 13,13,256 -> 26,26,256
+        x1_in = self.last_layer1_conv(out0_branch)
+        x1_in = self.last_layer1_upsample(x1_in)
+
+        # 26,26,256 + 26,26,512 -> 26,26,768
+        x1_in = torch.cat([x1_in, x1], 1)
+        #---------------------------------------------------#
+        #   第二个特征层
+        #   out1 = (batch_size,255,26,26)
+        #---------------------------------------------------#
+        # 26,26,768 -> 26,26,256 -> 26,26,512 -> 26,26,256 -> 26,26,512 -> 26,26,256
+        out1, out1_branch = _branch(self.last_layer1, x1_in)
+
+        # 26,26,256 -> 26,26,128 -> 52,52,128
+        x2_in = self.last_layer2_conv(out1_branch)
+        x2_in = self.last_layer2_upsample(x2_in)
+
+        # 52,52,128 + 52,52,256 -> 52,52,384
+        x2_in = torch.cat([x2_in, x2], 1)
+        #---------------------------------------------------#
+        #   第一个特征层
+        #   out3 = (batch_size,255,52,52)
+        #---------------------------------------------------#
+        # 52,52,384 -> 52,52,128 -> 52,52,256 -> 52,52,128 -> 52,52,256 -> 52,52,128
+        out2, _ = _branch(self.last_layer2, x2_in)
+        return out0, out1, out2
+```
+
+##### [1]yoloBody
+
+```python
+class YoloBody(nn.Module):
+    def __init__(self, config):
+        super(YoloBody, self).__init__()
+        self.config = config
+        #---------------------------------------------------#   
+        #   生成darknet53的主干模型
+        #   获得三个有效特征层，他们的shape分别是：
+        #   52,52,256
+        #   26,26,512
+        #   13,13,1024
+        #---------------------------------------------------#
+        self.backbone = darknet53(None)
+
+        # out_filters : [64, 128, 256, 512, 1024]
+        out_filters = self.backbone.layers_out_filters
+
+        #------------------------------------------------------------------------#
+        #   计算yolo_head的输出通道数，对于voc数据集而言
+        #   final_out_filter0 = final_out_filter1 = final_out_filter2 = 75
+        #------------------------------------------------------------------------#
+        final_out_filter0 = len(config["yolo"]["anchors"][0]) * (5 + config["yolo"]["classes"])
+        self.last_layer0 = make_last_layers([512, 1024], out_filters[-1], final_out_filter0)
+
+        final_out_filter1 = len(config["yolo"]["anchors"][1]) * (5 + config["yolo"]["classes"])
+        self.last_layer1_conv = conv2d(512, 256, 1)
+        self.last_layer1_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.last_layer1 = make_last_layers([256, 512], out_filters[-2] + 256, final_out_filter1)
+
+        final_out_filter2 = len(config["yolo"]["anchors"][2]) * (5 + config["yolo"]["classes"])
+        self.last_layer2_conv = conv2d(256, 128, 1)
+        self.last_layer2_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.last_layer2 = make_last_layers([128, 256], out_filters[-3] + 128, final_out_filter2)
+```
+
+同样是继承了nn.Module，进行初始化
+
+```python
+self.config = config
+```
+
+config来自于config.py文件
+
+***
+
+```python
+Config = \
+{   
+    #-------------------------------------------------------------#
+    #   训练前一定要修改classes参数
+    #   anchors可以不修改，因为anchors的通用性较大
+    #   而且大中小的设置非常符合yolo的特征层情况
+    #-------------------------------------------------------------#
+    "yolo": {
+        "anchors": [[[116, 90], [156, 198], [373, 326]],
+                    [[30, 61], [62, 45], [59, 119]],
+                    [[10, 13], [16, 30], [33, 23]]],
+        "classes": 20,
+    },
+    #-------------------------------------------------------------#
+    #   img_h和img_w可以修改成608x608
+    #-------------------------------------------------------------#
+    "img_h": 416,
+    "img_w": 416,
+}
+
+```
+
+***
+
+anchors的每一行代表不同精度的扫描模式，每一个元素代表box的H和W。
+
+classes代表训练目标检测的种类。
+
+```python
+self.backbone = darknet53(None)
+```
+
+这里实例化了一个DarkNet
+
+对于三种输出
+
+```python
+#------------------------------------------------------------------------#
+#   计算yolo_head的输出通道数，对于voc数据集而言
+#   final_out_filter0 = final_out_filter1 = final_out_filter2 = 75
+#------------------------------------------------------------------------#
+final_out_filter0 = len(config["yolo"]["anchors"][0]) * (5 + config["yolo"]["classes"])
+self.last_layer0 = make_last_layers([512, 1024], out_filters[-1], final_out_filter0)
+
+final_out_filter1 = len(config["yolo"]["anchors"][1]) * (5 + config["yolo"]["classes"])
+self.last_layer1_conv = conv2d(512, 256, 1)
+self.last_layer1_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+self.last_layer1 = make_last_layers([256, 512], out_filters[-2] + 256, final_out_filter1)
+
+final_out_filter2 = len(config["yolo"]["anchors"][2]) * (5 + config["yolo"]["classes"])
+self.last_layer2_conv = conv2d(256, 128, 1)
+self.last_layer2_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+self.last_layer2 = make_last_layers([128, 256], out_filters[-3] + 128, final_out_filter2)
+```
+
+首先计算通道数，通道数的计算方式是每一种比较精度的框的类型的数量*（5+判断的物体的种类数），其中五的话按照教程所说是1+4，1表示标记到物体没有，4**表示什么我忘了**，到时候看看
+
+不过我觉得这些通道数本来就是一些玄学的设置，因此不必过多追究
+
+总之计算下来这几个输出层的通道数都为75=3*（5+20）
+
+然后分别构建每个输出层。
+
+##### [2]低精度扫描输出层
+
+![image-20210131190705415](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210131190925.png)
+
+该层调用了函数
+
+```python
+self.last_layer0 = make_last_layers([512, 1024], out_filters[-1], final_out_filter0)
+```
+
+ make_last_layers()函数定义为
+
+```python
+#------------------------------------------------------------------------#
+#   make_last_layers里面一共有七个卷积，前五个用于提取特征。
+#   后两个用于获得yolo网络的预测结果
+#------------------------------------------------------------------------#
+def make_last_layers(filters_list, in_filters, out_filter):
+    m = nn.ModuleList([
+        conv2d(in_filters, filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        nn.Conv2d(filters_list[1], out_filter, kernel_size=1,
+                                        stride=1, padding=0, bias=True)
+    ])
+    return m
+```
+
+其中调用了函数 conv2d()
+
+```python
+def conv2d(filter_in, filter_out, kernel_size):
+    pad = (kernel_size - 1) // 2 if kernel_size else 0
+    return nn.Sequential(OrderedDict([
+        ("conv", nn.Conv2d(filter_in, filter_out, kernel_size=kernel_size, stride=1, padding=pad, bias=False)),
+        ("bn", nn.BatchNorm2d(filter_out)),
+        ("relu", nn.LeakyReLU(0.1)),
+    ]))
+```
+
+这里的conv2d里面的nn.Sequential(OrderedDict ( [ ] ) )和DarkNet的搭建方式差不多
+
+注意到conv2d()的卷积核一会为3，一会为1，这样好像有些作用？
+
+最后的红色的输出层的卷积操作为
+
+```python
+nn.Conv2d(filters_list[1], out_filter, kernel_size=1,stride=1, padding=0, bias=True)
+```
+
+**这里有一点很重要**
+
+```python
+nn.ModuleList([
+        conv2d(in_filters, filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        conv2d(filters_list[1], filters_list[0], 1),
+        conv2d(filters_list[0], filters_list[1], 3),
+        nn.Conv2d(filters_list[1], out_filter, kernel_size=1,
+                                        stride=1, padding=0, bias=True)
+    ])
+```
+
+使用了
+
+```python
+nn.ModuleList([])
+```
+
+这个容器和Sequential差不多，文章[详解PyTorch中的ModuleList和Sequential - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/75206669)中有很详细的解释。
+
+要知道一点就是Sequential已经帮你写好了forward，并将每个层注册到网络中，但是ModuleList会要求你自己写forward，这样的好处是可以提供一定程度的自由。后面会讲到如何为ModuleList写forward。
+
+##### [3]中精度扫描输出层
+
+````python
+self.last_layer1_conv = conv2d(512, 256, 1)
+self.last_layer1_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+self.last_layer1 = make_last_layers([256, 512], out_filters[-2] + 256, final_out_filter1)
+````
+
+重点是上采样
+
+```python
+nn.Upsample(scale_factor=2, mode='nearest')
+```
+
+使用最近邻算法进行上采样，不过我对于这一块不是很了解，大概需要一些图像处理的知识吧，留下一篇文章[(8条消息) 关于上采样方法总结（插值和深度学习）_藏晖的博客-CSDN博客_上采样方法](https://blog.csdn.net/qq_34919792/article/details/102697817)
+
+##### [4]高精度扫描输出层
+
+高精度扫描充分利用了前面多次卷积、BN和残差网络的信息，进行最后的输出，原理和前面的差不多
+
+```python
+final_out_filter2 = len(config["yolo"]["anchors"][2]) * (5 + config["yolo"]["classes"])
+self.last_layer2_conv = conv2d(256, 128, 1)
+self.last_layer2_upsample = nn.Upsample(scale_factor=2, mode='nearest')
+self.last_layer2 = make_last_layers([128, 256], out_filters[-3] + 128, final_out_filter2)
+```
+
+##### [5]forward层的构建
+
+```python
+def forward(self, x):
+        def _branch(last_layer, layer_in):
+            for i, e in enumerate(last_layer):
+                layer_in = e(layer_in)
+                if i == 4:
+                    out_branch = layer_in
+            return layer_in, out_branch
+        #---------------------------------------------------#   
+        #   获得三个有效特征层，他们的shape分别是：
+        #   52,52,256；26,26,512；13,13,1024
+        #---------------------------------------------------#
+        x2, x1, x0 = self.backbone(x)
+
+        #---------------------------------------------------#
+        #   第一个特征层
+        #   out0 = (batch_size,255,13,13)
+        #---------------------------------------------------#
+        # 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512
+        out0, out0_branch = _branch(self.last_layer0, x0)
+
+        # 13,13,512 -> 13,13,256 -> 26,26,256
+        x1_in = self.last_layer1_conv(out0_branch)
+        x1_in = self.last_layer1_upsample(x1_in)
+
+        # 26,26,256 + 26,26,512 -> 26,26,768
+        x1_in = torch.cat([x1_in, x1], 1)
+        #---------------------------------------------------#
+        #   第二个特征层
+        #   out1 = (batch_size,255,26,26)
+        #---------------------------------------------------#
+        # 26,26,768 -> 26,26,256 -> 26,26,512 -> 26,26,256 -> 26,26,512 -> 26,26,256
+        out1, out1_branch = _branch(self.last_layer1, x1_in)
+
+        # 26,26,256 -> 26,26,128 -> 52,52,128
+        x2_in = self.last_layer2_conv(out1_branch)
+        x2_in = self.last_layer2_upsample(x2_in)
+
+        # 52,52,128 + 52,52,256 -> 52,52,384
+        x2_in = torch.cat([x2_in, x2], 1)
+        #---------------------------------------------------#
+        #   第一个特征层
+        #   out3 = (batch_size,255,52,52)
+        #---------------------------------------------------#
+        # 52,52,384 -> 52,52,128 -> 52,52,256 -> 52,52,128 -> 52,52,256 -> 52,52,128
+        out2, _ = _branch(self.last_layer2, x2_in)
+        return out0, out1, out2
+```
+
+forward函数中有一个内嵌的函数
+
+```python
+def _branch(last_layer, layer_in):
+            for i, e in enumerate(last_layer):
+                layer_in = e(layer_in)
+                if i == 4:
+                    out_branch = layer_in
+            return layer_in, out_branch
+```
+
+ 这就是用来将nn.ModuleList([])中存储的层串联起来的。可以看出
+
+```python
+layer_in = e(layer_in)
+```
+
+在进行串联操作，但是到了最后需要有两个变量印出来，分别是layer_in和layer_out，out提供给粉色框框
+
+<img src="C:\Users\zjnyl\AppData\Roaming\Typora\typora-user-images\image-20210131191754377.png" alt="image-20210131191754377" style="zoom: 33%;" />
+
+**对了，我觉得有一点非常非常地奇怪：**
+
+```python
+self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+x = self.conv1(x)
+```
+
+这里我看了一下原代码
+
+```python
+class Conv2d(_ConvNd):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        dilation: _size_2_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        super(Conv2d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            False, _pair(0), groups, bias, padding_mode)
+
+    def _conv_forward(self, input, weight):
+        if self.padding_mode != 'zeros':
+            return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
+                            weight, self.bias, self.stride,
+                            _pair(0), self.dilation, self.groups)
+        return F.conv2d(input, weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return self._conv_forward(input, self.weight)
+```
+
+应该是先用
+
+```python
+self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+```
+
+实例化了一个卷积方法，然后使用
+
+```python
+x = self.conv1(x)
+```
+
+调用了该方法的forward函数进行运算，不过为什么conv1就知道只要输入了一个Tensor就要调用forward函数呢？
+
+不过先不管这些
+
+```python
+x2, x1, x0 = self.backbone(x)
+```
+
+将DarkNet的三个输出印出来，同样的，为什么
+
+```python
+model = DarkNet([1, 2, 8, 8, 4])
+```
+
+就知道调用forward函数并返回三个结果呢？
+
+***
+
+```python
+#---------------------------------------------------#
+#   第一个特征层
+#   out0 = (batch_size,255,13,13)
+#---------------------------------------------------#
+# 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512 -> 13,13,1024 -> 13,13,512
+out0, out0_branch = _branch(self.last_layer0, x0)
+
+# 13,13,512 -> 13,13,256 -> 26,26,256
+x1_in = self.last_layer1_conv(out0_branch)
+x1_in = self.last_layer1_upsample(x1_in)
+
+# 26,26,256 + 26,26,512 -> 26,26,768
+x1_in = torch.cat([x1_in, x1], 1)
+```
+
+将两个分支的数据引出，一个作为整个YOLO网络输出层的一个输出，另一个传递给下一级，进行卷积或者上采样，然后和来自DarkNet的层进行拼接。
+
+```python
+x1_in = torch.cat([x1_in, x1], 1)
+```
+
+高精度的输出的卷积、拼接方案同理。
+
+最后返回的三个张量就是结果
+
+```python
+return out0, out1, out2
+```
+
+显然需要解码然后进行损失函数的判断。
+
+#### 3. 训练神经网络
+
+#####  [1]train.py
+
+```python
+#-------------------------------------#
+#       对数据集进行训练
+#-------------------------------------#
+import os
+import time
+
+import numpy as np
+import torch
+import torch.backends.cudnn as cudnn
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.autograd import Variable
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from nets.yolo3 import YoloBody
+from nets.yolo_training import Generator, YOLOLoss
+from utils.config import Config
+from utils.dataloader import YoloDataset, yolo_dataset_collate
+
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+        
+def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
+    total_loss = 0
+    val_loss = 0
+
+    net.train()
+    with tqdm(total=epoch_size,desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+        for iteration, batch in enumerate(gen):
+            if iteration >= epoch_size:
+                break
+            images, targets = batch[0], batch[1]
+            with torch.no_grad():
+                if cuda:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor)).cuda()
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+                else:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor))
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+
+            #----------------------#
+            #   清零梯度
+            #----------------------#
+            optimizer.zero_grad()
+            #----------------------#
+            #   前向传播
+            #----------------------#
+            outputs = net(images)
+            losses = []
+            num_pos_all = 0
+            #----------------------#
+            #   计算损失
+            #----------------------#
+            for i in range(3):
+                loss_item, num_pos = yolo_losses[i](outputs[i], targets)
+                losses.append(loss_item)
+                num_pos_all += num_pos
+
+            loss = sum(losses) / num_pos_all
+            #----------------------#
+            #   反向传播
+            #----------------------#
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            
+            pbar.set_postfix(**{'total_loss': total_loss / (iteration + 1), 
+                                'lr'        : get_lr(optimizer)})
+            pbar.update(1)
+
+    net.eval()
+    print('Start Validation')
+    with tqdm(total=epoch_size_val, desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+        for iteration, batch in enumerate(genval):
+            if iteration >= epoch_size_val:
+                break
+            images_val, targets_val = batch[0], batch[1]
+
+            with torch.no_grad():
+                if cuda:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor)).cuda()
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                else:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor))
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                optimizer.zero_grad()
+                outputs = net(images_val)
+                losses = []
+                num_pos_all = 0
+                for i in range(3):
+                    loss_item, num_pos = yolo_losses[i](outputs[i], targets_val)
+                    losses.append(loss_item)
+                    num_pos_all += num_pos
+                loss = sum(losses) / num_pos_all
+                val_loss += loss.item()
+            pbar.set_postfix(**{'total_loss': val_loss / (iteration + 1)})
+            pbar.update(1)
+    print('Finish Validation')
+    print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
+    print('Total Loss: %.4f || Val Loss: %.4f ' % (total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+
+    print('Saving state, iter:', str(epoch+1))
+    torch.save(model.state_dict(), 'logs/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+
+#----------------------------------------------------#
+#   检测精度mAP和pr曲线计算参考视频
+#   https://www.bilibili.com/video/BV1zE411u7Vw
+#----------------------------------------------------#
+if __name__ == "__main__":
+    #-------------------------------#
+    #   是否使用Cuda
+    #   没有GPU可以设置成False
+    #-------------------------------#
+    Cuda = False
+    #-------------------------------#
+    #   Dataloder的使用
+    #-------------------------------#
+    Use_Data_Loader = True
+    #------------------------------------------------------#
+    #   是否对损失进行归一化，用于改变loss的大小
+    #   用于决定计算最终loss是除上batch_size还是除上正样本数量
+    #------------------------------------------------------#
+    normalize = False
+    #------------------------------------------------------#
+    #   创建yolo模型
+    #   训练前一定要修改Config里面的classes参数
+    #------------------------------------------------------#
+    model = YoloBody(Config)
+
+    #------------------------------------------------------#
+    #   权值文件请看README，百度网盘下载
+    #------------------------------------------------------#
+    model_path = "model_data/yolo_weights.pth"
+    print('Loading weights into state dict...')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model_dict = model.state_dict()
+    pretrained_dict = torch.load(model_path, map_location=device)
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if np.shape(model_dict[k]) ==  np.shape(v)}
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print('Finished!')
+
+    net = model.train()
+
+    if Cuda:
+        net = torch.nn.DataParallel(model)
+        cudnn.benchmark = True
+        net = net.cuda()
+
+    # 建立loss函数
+    yolo_losses = []
+    for i in range(3):
+        yolo_losses.append(YOLOLoss(np.reshape(Config["yolo"]["anchors"],[-1,2]),
+                                    Config["yolo"]["classes"], (Config["img_w"], Config["img_h"]), Cuda, normalize))
+
+    #----------------------------------------------------#
+    #   获得图片路径和标签
+    #----------------------------------------------------#
+    annotation_path = '2007_train.txt'
+    #----------------------------------------------------------------------#
+    #   验证集的划分在train.py代码里面进行
+    #   2007_test.txt和2007_val.txt里面没有内容是正常的。训练不会使用到。
+    #   当前划分方式下，验证集和训练集的比例为1:9
+    #----------------------------------------------------------------------#
+    val_split = 0.1
+    with open(annotation_path) as f:
+        lines = f.readlines()
+    np.random.seed(10101)
+    np.random.shuffle(lines)
+    np.random.seed(None)
+    num_val = int(len(lines)*val_split)
+    num_train = len(lines) - num_val
+    
+    #------------------------------------------------------#
+    #   主干特征提取网络特征通用，冻结训练可以加快训练速度
+    #   也可以在训练初期防止权值被破坏。
+    #   Init_Epoch为起始世代
+    #   Freeze_Epoch为冻结训练的世代
+    #   Unfreeze_Epoch总训练世代
+    #   提示OOM或者显存不足请调小Batch_size
+    #------------------------------------------------------#
+    if True:
+        lr = 1e-3
+        Batch_size = 8
+        Init_Epoch = 0
+        Freeze_Epoch = 50
+        
+        optimizer = optim.Adam(net.parameters(),lr)
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+
+        if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+                        
+        epoch_size = num_train//Batch_size
+        epoch_size_val = num_val//Batch_size
+        #------------------------------------#
+        #   冻结一定部分训练
+        #------------------------------------#
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+
+        for epoch in range(Init_Epoch,Freeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Freeze_Epoch,Cuda)
+            lr_scheduler.step()
+            
+    if True:
+        lr = 1e-4
+        Batch_size = 4
+        Freeze_Epoch = 50
+        Unfreeze_Epoch = 100
+
+        optimizer = optim.Adam(net.parameters(),lr)
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+        
+        if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+                        
+        epoch_size = num_train//Batch_size
+        epoch_size_val = num_val//Batch_size
+        #------------------------------------#
+        #   解冻后训练
+        #------------------------------------#
+        for param in model.backbone.parameters():
+            param.requires_grad = True
+
+        for epoch in range(Freeze_Epoch,Unfreeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Unfreeze_Epoch,Cuda)
+            lr_scheduler.step()
+```
+
+##### [2]主函数
+
+```python
+#----------------------------------------------------#
+#   检测精度mAP和pr曲线计算参考视频
+#   https://www.bilibili.com/video/BV1zE411u7Vw
+#----------------------------------------------------#
+if __name__ == "__main__":
+    #-------------------------------#
+    #   是否使用Cuda
+    #   没有GPU可以设置成False
+    #-------------------------------#
+    Cuda = False
+    #-------------------------------#
+    #   Dataloder的使用
+    #-------------------------------#
+    Use_Data_Loader = True
+    #------------------------------------------------------#
+    #   是否对损失进行归一化，用于改变loss的大小
+    #   用于决定计算最终loss是除上batch_size还是除上正样本数量
+    #------------------------------------------------------#
+    normalize = False
+    #------------------------------------------------------#
+    #   创建yolo模型
+    #   训练前一定要修改Config里面的classes参数
+    #------------------------------------------------------#
+    model = YoloBody(Config)
+
+    #------------------------------------------------------#
+    #   权值文件请看README，百度网盘下载
+    #------------------------------------------------------#
+    model_path = "model_data/yolo_weights.pth"
+    print('Loading weights into state dict...')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model_dict = model.state_dict()
+    pretrained_dict = torch.load(model_path, map_location=device)
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if np.shape(model_dict[k]) ==  np.shape(v)}
+    model_dict.update(pretrained_dict)
+    model.load_state_dict(model_dict)
+    print('Finished!')
+
+    net = model.train()
+
+    if Cuda:
+        net = torch.nn.DataParallel(model)
+        cudnn.benchmark = True
+        net = net.cuda()
+
+    # 建立loss函数
+    yolo_losses = []
+    for i in range(3):
+        yolo_losses.append(YOLOLoss(np.reshape(Config["yolo"]["anchors"],[-1,2]),
+                                    Config["yolo"]["classes"], (Config["img_w"], Config["img_h"]), Cuda, normalize))
+
+    #----------------------------------------------------#
+    #   获得图片路径和标签
+    #----------------------------------------------------#
+    annotation_path = '2007_train.txt'
+    #----------------------------------------------------------------------#
+    #   验证集的划分在train.py代码里面进行
+    #   2007_test.txt和2007_val.txt里面没有内容是正常的。训练不会使用到。
+    #   当前划分方式下，验证集和训练集的比例为1:9
+    #----------------------------------------------------------------------#
+    val_split = 0.1
+    with open(annotation_path) as f:
+        lines = f.readlines()
+    np.random.seed(10101)
+    np.random.shuffle(lines)
+    np.random.seed(None)
+    num_val = int(len(lines)*val_split)
+    num_train = len(lines) - num_val
+    
+    #------------------------------------------------------#
+    #   主干特征提取网络特征通用，冻结训练可以加快训练速度
+    #   也可以在训练初期防止权值被破坏。
+    #   Init_Epoch为起始世代
+    #   Freeze_Epoch为冻结训练的世代
+    #   Unfreeze_Epoch总训练世代
+    #   提示OOM或者显存不足请调小Batch_size
+    #------------------------------------------------------#
+    if True:
+        lr = 1e-3
+        Batch_size = 8
+        Init_Epoch = 0
+        Freeze_Epoch = 50
+        
+        optimizer = optim.Adam(net.parameters(),lr)
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+
+        if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+                        
+        epoch_size = num_train//Batch_size
+        epoch_size_val = num_val//Batch_size
+        #------------------------------------#
+        #   冻结一定部分训练
+        #------------------------------------#
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+
+        for epoch in range(Init_Epoch,Freeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Freeze_Epoch,Cuda)
+            lr_scheduler.step()
+            
+    if True:
+        lr = 1e-4
+        Batch_size = 4
+        Freeze_Epoch = 50
+        Unfreeze_Epoch = 100
+
+        optimizer = optim.Adam(net.parameters(),lr)
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+        
+        if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+                        
+        epoch_size = num_train//Batch_size
+        epoch_size_val = num_val//Batch_size
+        #------------------------------------#
+        #   解冻后训练
+        #------------------------------------#
+        for param in model.backbone.parameters():
+            param.requires_grad = True
+
+        for epoch in range(Freeze_Epoch,Unfreeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Unfreeze_Epoch,Cuda)
+            lr_scheduler.step()
+
+```
+
+###### 正样本和负样本
+
+```python
+#------------------------------------------------------#
+#   是否对损失进行归一化，用于改变loss的大小
+#   用于决定计算最终loss是除上batch_size还是除上正样本数量
+#------------------------------------------------------#
+normalize = False
+```
+
+> 正样本是指属于某一类别的样本,反样本是指不属于某一类别的样本
+> 比如说你在做字母A的图像识别，字母A的样本就属于正样本，不是字母A的样本就属于负样本
+
+这边文章较好的讲解了batch_size的选取[(8条消息) 神经网络中Batch Size的理解_myc的博客-CSDN博客](https://blog.csdn.net/qq_34886403/article/details/82558399)
+
+###### 实例化一个YOLOv3神经网络
+
+```py
+model = YoloBody(Config)
+```
+
+###### 载入预训练好的权值文件
+
+```python
+model_path = "model_data/yolo_weights.pth"
+print('Loading weights into state dict...')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model_dict = model.state_dict()
+pretrained_dict = torch.load(model_path, map_location=device)
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if np.shape(model_dict[k]) ==  np.shape(v)}
+model_dict.update(pretrained_dict)
+model.load_state_dict(model_dict)
+print('Finished!')
+```
+
+首先确定使用的训练的设备是CPU还是GPU
+
+```python
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+```
+
+加载权值文件到CPU/GPU中训练
+
+```python
+pretrained_dict = torch.load(model_path, map_location=device)
+```
+
+这个应该是为了校验pytorch中网络的键值对的维数是否能对的上，即网络中的每个节点是否能对应上其权值的分布？
+
+```
+A B C        1 2 3
+D E F   ->   4 5 6
+G H I        7 8 9
+```
+
+```python
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if np.shape(model_dict[k]) ==  np.shape(v)}
+```
+
+更新并装载pytorch的字典类型，也即装入权值文件
+
+```python
+model_dict.update(pretrained_dict)
+model.load_state_dict(model_dict)
+```
+
+###### 启动训练模式
+
+```python
+net = model.train()
+```
+
+讨论开启训练模式以后的batch以及激活的变化的文章[(8条消息) Pytorch的net.train 和 net.eval的使用_Never-Giveup的博客-CSDN博客](https://blog.csdn.net/qq_36653505/article/details/84728489)
+
+###### 建立loss函数
+
+```python
+# 建立loss函数
+    yolo_losses = []
+    for i in range(3):
+        yolo_losses.append(YOLOLoss(np.reshape(Config["yolo"]["anchors"],[-1,2]),
+                                    Config["yolo"]["classes"], (Config["img_w"], Config["img_h"]), Cuda, normalize))
+```
+
+这里调用了yolo_traning.py文件中的YOLOLoss构造函数
+
+```python
+class YOLOLoss(nn.Module):
+    def __init__(self, anchors, num_classes, img_size, cuda, normalize):
+        super(YOLOLoss, self).__init__()
+        #-----------------------------------------------------------#
+        #   13x13的特征层对应的anchor是[116,90],[156,198],[373,326]
+        #   26x26的特征层对应的anchor是[30,61],[62,45],[59,119]
+        #   52x52的特征层对应的anchor是[10,13],[16,30],[33,23]
+        #-----------------------------------------------------------#
+        self.anchors = anchors
+        self.num_anchors = len(anchors)
+        self.num_classes = num_classes
+        self.bbox_attrs = 5 + num_classes
+        #-------------------------------------#
+        #   获得特征层的宽高
+        #   13、26、52
+        #-------------------------------------#
+        self.feature_length = [img_size[0]//32,img_size[0]//16,img_size[0]//8]
+        self.img_size = img_size
+
+        self.ignore_threshold = 0.5
+        self.lambda_xy = 1.0
+        self.lambda_wh = 1.0
+        self.lambda_conf = 1.0
+        self.lambda_cls = 1.0
+        self.cuda = cuda
+        self.normalize = normalize
+```
+
+首先要注意这个操作
+
+```python
+np.reshape(Config["yolo"]["anchors"],[-1,2])
+```
+
+我花了好多功夫才搞懂，这个的意思是将
+
+```
+Config["yolo"]["anchors"]
+```
+
+矩阵变换为两列的形式，[-1,2] 中的-1表示未知，因此就是将这个Config文件排列成n*2的矩阵。
+
+例如一开始的config文件长这样
+
+```
+[[[116, 90], [156, 198], [373, 326]], [[30, 61], [62, 45], [59, 119]], [[10, 13], [16, 30], [33, 23]]] [-1, 2]
+```
+
+reshape以后的文件长这样
+
+```
+[[116  90]
+ [156 198]
+ [373 326]
+ [ 30  61]
+ [ 62  45]
+ [ 59 119]
+ [ 10  13]
+ [ 16  30]
+ [ 33  23]]
+```
+
+下面进入构造函数
+
+```python
+class YOLOLoss(nn.Module): 
+ def __init__(self, anchors, num_classes, img_size, cuda, normalize):
+        super(YOLOLoss, self).__init__()
+        #-----------------------------------------------------------#
+        #   13x13的特征层对应的anchor是[116,90],[156,198],[373,326]
+        #   26x26的特征层对应的anchor是[30,61],[62,45],[59,119]
+        #   52x52的特征层对应的anchor是[10,13],[16,30],[33,23]
+        #-----------------------------------------------------------#
+        self.anchors = anchors
+        self.num_anchors = len(anchors)
+        self.num_classes = num_classes
+        self.bbox_attrs = 5 + num_classes
+        #-------------------------------------#
+        #   获得特征层的宽高
+        #   13、26、52
+        #-------------------------------------#
+        self.feature_length = [img_size[0]//32,img_size[0]//16,img_size[0]//8]
+        self.img_size = img_size
+
+        self.ignore_threshold = 0.5
+        self.lambda_xy = 1.0
+        self.lambda_wh = 1.0
+        self.lambda_conf = 1.0
+        self.lambda_cls = 1.0
+        self.cuda = cuda
+        self.normalize = normalize
+```
+
+attr是属性attribute的缩写
+
+好像暂时还没什么好说的，关于构造函数
+
+###### 划分训练集和验证集
+
+```python
+#----------------------------------------------------------------------#
+#   验证集的划分在train.py代码里面进行
+#   2007_test.txt和2007_val.txt里面没有内容是正常的。训练不会使用到。
+#   当前划分方式下，验证集和训练集的比例为1:9
+#----------------------------------------------------------------------#
+val_split = 0.1
+with open(annotation_path) as f:
+	lines = f.readlines()
+np.random.seed(10101)
+np.random.shuffle(lines)
+np.random.seed(None)
+num_val = int(len(lines)*val_split)
+num_train = len(lines) - num_val
+```
+
+其中
+
+```python
+np.random.seed(10101)
+np.random.shuffle(lines)
+np.random.seed(None)
+```
+
+设定随机种子，然后打乱数据集顺序。
+
+```python
+num_val = int(len(lines)*val_split)
+num_train = len(lines) - num_val
+```
+
+val->validation
+
+train->train
+
+###### 开始训练
+
+```python
+#------------------------------------------------------#
+    #   主干特征提取网络特征通用，冻结训练可以加快训练速度
+    #   也可以在训练初期防止权值被破坏。
+    #   Init_Epoch为起始世代
+    #   Freeze_Epoch为冻结训练的世代
+    #   Unfreeze_Epoch总训练世代
+    #   提示OOM或者显存不足请调小Batch_size
+    #------------------------------------------------------#
+    if True:
+        lr = 1e-3
+        Batch_size = 8
+        Init_Epoch = 0
+        Freeze_Epoch = 50
+        
+        optimizer = optim.Adam(net.parameters(),lr)
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+
+        if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+                        
+        epoch_size = num_train//Batch_size
+        epoch_size_val = num_val//Batch_size
+        #------------------------------------#
+        #   冻结一定部分训练
+        #------------------------------------#
+        for param in model.backbone.parameters():
+            param.requires_grad = False
+
+        for epoch in range(Init_Epoch,Freeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Freeze_Epoch,Cuda)
+            lr_scheduler.step()
+```
+
+* 这一个知识点还不太懂：神经网络的冻结训练和解冻训练
+* 听说目的是为了初期训练的时候不会破坏初始的主干特征提取网络
+
+首先先看看优化器的设置
+
+```python
+optimizer = optim.Adam(net.parameters(),lr)
+```
+
+这里采用了Adam优化，优化的作用是能够动态地调整学习率，从而加快学习速度。
+
+Adam优化需要提供网络的param和lr(learning rate)
+
+之前虽然认真学了吴恩达深度学习中的各种优化方案，但是都忘干净了
+
+这是一篇关于Adam优化的文章[(8条消息) Adam优化算法详细解析_luoxuexiong的博客-CSDN博客_adam算法](https://blog.csdn.net/luoxuexiong/article/details/90412213)
+
+***
+
+接着将优化器注册入
+
+```
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=0.92)
+```
+
+`torch.optim.lr_scheduler`模块提供了一些根据epoch训练次数来调整学习率（learning rate）的方法。一般情况下我们会设置随着epoch的增大而逐渐减小学习率从而达到更好的训练效果。
+
+`scheduler`调度程序
+
+文章
+
+[(8条消息) torch.optim.lr_scheduler：调整学习率_qyhaill的博客-CSDN博客](https://blog.csdn.net/qyhaill/article/details/103043637)
+
+[深度学习中的优化算法 - MO_JOJOJO - 博客园 (cnblogs.com)](https://www.cnblogs.com/mx0813/p/12616920.html)
+
+***
+
+```python
+		if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+```
+
+如果选择使用DataLoader的话，就要为DataLoader提供：
+
+* pytorch定义的Dataset
+
+* collate_fn参数，其定义为：
+
+  > (*callable,* *optional*) – merges a list of samples to form a mini-batch of Tensor(s). Used when using batched loading from a map-style dataset.
+
+YoloDataset的初始化函数
+
+```python
+class YoloDataset(Dataset):
+    def __init__(self, train_lines, image_size, is_train):
+        super(YoloDataset, self).__init__()
+
+        self.train_lines = train_lines
+        self.train_batches = len(train_lines)
+        self.image_size = image_size
+        self.is_train = is_train
+```
+
+YoloDataset继承自父类DataSet，因此实例化后可以作为参数传入DataLoader中。
+
+在构造YoloDataset的时候，传入train_lines的时候，有
+
+```
+lines[:num_train]
+```
+
+这样的操作，这是典型的矩阵切片操作，返回前num_train行的数据，
+
+这是矩阵的行操作，还有列操作，具体详见python的常见矩阵操作[Python numpy中矩阵的基本用法汇总_python_脚本之家 (jb51.net)](https://www.jb51.net/article/156109.htm)
+
+如果没猜错的话
+
+```
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000005.jpg 263,211,324,339,8 165,264,253,372,8 241,194,295,299,8
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000007.jpg 141,50,500,330,6
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000009.jpg 69,172,270,330,12 150,141,229,284,14 285,201,327,331,14 258,198,297,329,14
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000012.jpg 156,97,351,270,6
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000016.jpg 92,72,305,473,1
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000017.jpg 185,62,279,199,14 90,78,403,336,12
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000019.jpg 231,88,483,256,7 11,113,266,259,7
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000020.jpg 33,148,371,416,6
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000021.jpg 1,235,182,388,11 210,36,336,482,14 46,82,170,365,14 11,181,142,419,14
+C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000023.jpg 9,230,245,500,1 230,220,334,500,1 2,1,117,369,14 3,2,243,462,14 225,1,334,486,14
+```
+
+需要提供lines中的训练集的样本的地址和样本标记给DataLoader，这应该是标准的格式，不过有待考证。
+
+***
+
+```python
+# DataLoader中collate_fn使用
+def yolo_dataset_collate(batch):
+    images = []
+    bboxes = []
+    for img, box in batch:
+        images.append(img)
+        bboxes.append(box)
+    images = np.array(images)
+    return images, bboxes
+```
+
+这里是为collate_fn参数提供数据，主要的目的是将图片和标记框的数据分离开
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
