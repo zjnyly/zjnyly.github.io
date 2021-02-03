@@ -1,3 +1,7 @@
+# YOLOv3学习笔记
+
+
+
 ###  YOLOv3 上手
 
 这是对视频进行预测的效果
@@ -1835,6 +1839,18 @@ C:\Users\zjnyl\Desktop\yolo3-pytorch-master/VOCdevkit/VOC2007/JPEGImages/000023.
 
 需要提供lines中的训练集的样本的地址和样本标记给DataLoader，这应该是标准的格式，不过有待考证。
 
+^
+
+|
+
+|
+
+这里纠正一下，我现在搞懂了专门写一个DataLoader类的目的：为了能够生成随机图片，也即对原有的训练集的图像进行色域、方向、正反等一系列的变换，以某种程度上提高训练集的数量，但是要记得将标记框的变换后的位置也补充出来。
+
+dataloader类的学习和解释稍后补充出来。先把train写完。
+
+
+
 ***
 
 ```python
@@ -1849,7 +1865,1532 @@ def yolo_dataset_collate(batch):
     return images, bboxes
 ```
 
-这里是为collate_fn参数提供数据，主要的目的是将图片和标记框的数据分离开
+**callable：可调用的**
+
+>  **collate_fn** (*callable**,* *optional*) – merges a list of samples to form a mini-batch of Tensor(s). Used when using batched loading from a map-style dataset.
+
+这个函数的作用是将按照map风格存储的数据集分离成list，就像上面的代码部分一样。
+
+***
+
+现在回到这里：
+
+```python
+ if Use_Data_Loader:
+            train_dataset = YoloDataset(lines[:num_train], (Config["img_h"], Config["img_w"]), True)
+            val_dataset = YoloDataset(lines[num_train:], (Config["img_h"], Config["img_w"]), False)
+            gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+            gen_val = DataLoader(val_dataset, shuffle=True, batch_size=Batch_size, num_workers=4,pin_memory=True, 
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+        else:
+            gen = Generator(Batch_size, lines[:num_train],
+                             (Config["img_h"], Config["img_w"])).generate(True)
+            gen_val = Generator(Batch_size, lines[num_train:],
+                             (Config["img_h"], Config["img_w"])).generate(False)
+```
+
+如果不用dataloader的话，就直接使用Generator，调用其generate方法进行生成。
+
+Generate类在、yolo_training.py文件下。
+
+其长相与Dataloader类类似
+
+```python
+class Generator(object):
+    def __init__(self,batch_size,
+                 train_lines, image_size,
+                 ):
+        
+        self.batch_size = batch_size
+        self.train_lines = train_lines
+        self.train_batches = len(train_lines)
+        self.image_size = image_size
+        
+    def get_random_data(self, annotation_line, input_shape, jitter=.3, hue=.1, sat=1.5, val=1.5, random=True):
+        '''r实时数据增强的随机预处理'''
+        line = annotation_line.split()
+        image = Image.open(line[0])
+        iw, ih = image.size
+        h, w = input_shape
+        box = np.array([np.array(list(map(int,box.split(',')))) for box in line[1:]])
+
+        if not random:
+            scale = min(w/iw, h/ih)
+            nw = int(iw*scale)
+            nh = int(ih*scale)
+            dx = (w-nw)//2
+            dy = (h-nh)//2
+
+            image = image.resize((nw,nh), Image.BICUBIC)
+            new_image = Image.new('RGB', (w,h), (128,128,128))
+            new_image.paste(image, (dx, dy))
+            image_data = np.array(new_image, np.float32)
+
+            # 调整目标框坐标
+            box_data = np.zeros((len(box), 5))
+            if len(box) > 0:
+                np.random.shuffle(box)
+                box[:, [0, 2]] = box[:, [0, 2]] * nw / iw + dx
+                box[:, [1, 3]] = box[:, [1, 3]] * nh / ih + dy
+                box[:, 0:2][box[:, 0:2] < 0] = 0
+                box[:, 2][box[:, 2] > w] = w
+                box[:, 3][box[:, 3] > h] = h
+                box_w = box[:, 2] - box[:, 0]
+                box_h = box[:, 3] - box[:, 1]
+                box = box[np.logical_and(box_w > 1, box_h > 1)]  # 保留有效框
+                box_data = np.zeros((len(box), 5))
+                box_data[:len(box)] = box
+
+            return image_data, box_data
+
+        # resize image
+        new_ar = w/h * rand(1-jitter,1+jitter)/rand(1-jitter,1+jitter)
+        scale = rand(.25, 2)
+        if new_ar < 1:
+            nh = int(scale*h)
+            nw = int(nh*new_ar)
+        else:
+            nw = int(scale*w)
+            nh = int(nw/new_ar)
+        image = image.resize((nw,nh), Image.BICUBIC)
+
+        # place image
+        dx = int(rand(0, w-nw))
+        dy = int(rand(0, h-nh))
+        new_image = Image.new('RGB', (w,h), (128,128,128))
+        new_image.paste(image, (dx, dy))
+        image = new_image
+
+        # flip image or not
+        flip = rand()<.5
+        if flip: image = image.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # distort image
+        hue = rand(-hue, hue)
+        sat = rand(1, sat) if rand()<.5 else 1/rand(1, sat)
+        val = rand(1, val) if rand()<.5 else 1/rand(1, val)
+        x = cv2.cvtColor(np.array(image,np.float32)/255, cv2.COLOR_RGB2HSV)
+        x[..., 0] += hue*360
+        x[..., 0][x[..., 0]>1] -= 1
+        x[..., 0][x[..., 0]<0] += 1
+        x[..., 1] *= sat
+        x[..., 2] *= val
+        x[x[:,:, 0]>360, 0] = 360
+        x[:, :, 1:][x[:, :, 1:]>1] = 1
+        x[x<0] = 0
+        image_data = cv2.cvtColor(x, cv2.COLOR_HSV2RGB)*255
+
+        # correct boxes
+        box_data = np.zeros((len(box),5))
+        if len(box)>0:
+            np.random.shuffle(box)
+            box[:, [0,2]] = box[:, [0,2]]*nw/iw + dx
+            box[:, [1,3]] = box[:, [1,3]]*nh/ih + dy
+            if flip: box[:, [0,2]] = w - box[:, [2,0]]
+            box[:, 0:2][box[:, 0:2]<0] = 0
+            box[:, 2][box[:, 2]>w] = w
+            box[:, 3][box[:, 3]>h] = h
+            box_w = box[:, 2] - box[:, 0]
+            box_h = box[:, 3] - box[:, 1]
+            box = box[np.logical_and(box_w>1, box_h>1)] # discard invalid box
+            box_data = np.zeros((len(box),5))
+            box_data[:len(box)] = box
+
+        return image_data, box_data
+
+    def generate(self, train=True):
+        while True:
+            shuffle(self.train_lines)
+            lines = self.train_lines
+            inputs = []
+            targets = []
+            for annotation_line in lines:  
+                if train:
+                    img,y=self.get_random_data(annotation_line, self.image_size[0:2])
+                else:
+                    img,y=self.get_random_data(annotation_line, self.image_size[0:2], random=False)
+
+                if len(y)!=0:
+                    boxes = np.array(y[:,:4],dtype=np.float32)
+                    boxes[:,0] = boxes[:,0]/self.image_size[1]
+                    boxes[:,1] = boxes[:,1]/self.image_size[0]
+                    boxes[:,2] = boxes[:,2]/self.image_size[1]
+                    boxes[:,3] = boxes[:,3]/self.image_size[0]
+
+                    boxes = np.maximum(np.minimum(boxes,1),0)
+                    boxes[:,2] = boxes[:,2] - boxes[:,0]
+                    boxes[:,3] = boxes[:,3] - boxes[:,1]
+    
+                    boxes[:,0] = boxes[:,0] + boxes[:,2]/2
+                    boxes[:,1] = boxes[:,1] + boxes[:,3]/2
+                    y = np.concatenate([boxes,y[:,-1:]],axis=-1)
+                    
+                img = np.array(img,dtype = np.float32)
+
+                inputs.append(np.transpose(img/255.0,(2,0,1)))                  
+                targets.append(np.array(y,dtype = np.float32))
+                if len(targets) == self.batch_size:
+                    tmp_inp = np.array(inputs)
+                    tmp_targets = targets
+                    inputs = []
+                    targets = []
+                    yield tmp_inp, tmp_targets
+
+```
+
+最后一行有一个很有趣的语法，yield，改语法会使得在调用该函数时候，其实获得的是一个迭代器而非直接调用函数。但是我还没看懂在这个代码中，生成的这两个是给了谁，因为调用Generator类的是一个变量而非两个。
+
+***
+
+**还有就是我现在还不知道冻结一部分训练和解冻一部分训练是什么意思**
+
+```python
+#------------------------------------#
+#   冻结一定部分训练
+#------------------------------------#
+for param in model.backbone.parameters():
+	param.requires_grad = False
+#------------------------------------#
+#   解冻后训练
+#------------------------------------#
+for param in model.backbone.parameters():
+	param.requires_grad = True
+```
+
+我发现python有一点好，就是所有的对象都是引用，因此不需要像c++一样声明是一个引用的对象才不需要对对象的更改是否能够真正影响变量而担忧。
+
+**backbone : 脊柱，主干网络**
+
+好了，我现在明白了
+
+由于训练的时候调用的预训练过的主干神经网络在神经网络前面一部分是可以直接迁移学习的，因此在一开始就训练很有可能扰乱神经连接，所以前面几次先冻结，后面再进行整体的参数训练。
+
+所谓的冻结，就是在back-prop的时候，冻结某些参数不让其修改就是了。
+
+***
+
+下面研究真正的使用数据集训练模型的代码：
+
+```python
+for epoch in range(Init_Epoch,Freeze_Epoch):
+            fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,gen_val,Freeze_Epoch,Cuda)
+            lr_scheduler.step()
+```
+
+进行n个世代的训练，每次训练完后，更新learning rate，通过优化器。
+
+这是训练代码：
+
+```python
+def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda):
+    total_loss = 0
+    val_loss = 0
+
+    net.train()
+    with tqdm(total=epoch_size,desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+        for iteration, batch in enumerate(gen):
+            if iteration >= epoch_size:
+                break
+            images, targets = batch[0], batch[1]
+            with torch.no_grad():
+                if cuda:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor)).cuda()
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+                else:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor))
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+
+            #----------------------#
+            #   清零梯度
+            #----------------------#
+            optimizer.zero_grad()
+            #----------------------#
+            
+            #   前向传播
+            #----------------------#
+            outputs = net(images)
+            losses = []
+            num_pos_all = 0
+            #----------------------#
+            #   计算损失
+            #----------------------#
+            for i in range(3):
+                loss_item, num_pos = yolo_losses[i](outputs[i], targets)
+                losses.append(loss_item)
+                num_pos_all += num_pos
+
+            loss = sum(losses) / num_pos_all
+            #----------------------#
+            #   反向传播
+            #----------------------#
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            
+            pbar.set_postfix(**{'total_loss': total_loss / (iteration + 1), 
+                                'lr'        : get_lr(optimizer)})
+            pbar.update(1)
+
+    net.eval()
+    print('Start Validation')
+    with tqdm(total=epoch_size_val, desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+        for iteration, batch in enumerate(genval):
+            if iteration >= epoch_size_val:
+                break
+            images_val, targets_val = batch[0], batch[1]
+
+            with torch.no_grad():
+                if cuda:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor)).cuda()
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                else:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor))
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                optimizer.zero_grad()
+                outputs = net(images_val)
+                losses = []
+                num_pos_all = 0
+                for i in range(3):
+                    loss_item, num_pos = yolo_losses[i](outputs[i], targets_val)
+                    losses.append(loss_item)
+                    num_pos_all += num_pos
+                loss = sum(losses) / num_pos_all
+                val_loss += loss.item()
+            pbar.set_postfix(**{'total_loss': val_loss / (iteration + 1)})
+            pbar.update(1)
+    print('Finish Validation')
+    print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
+    print('Total Loss: %.4f || Val Loss: %.4f ' % (total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+
+    print('Saving state, iter:', str(epoch+1))
+    torch.save(model.state_dict(), 'logs/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+```
+
+一开始我被这个语法唬到了
+
+```python
+ with tqdm(total=epoch_size,desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+```
+
+但是我才知道tqdm是一个进度条库，里面的参数
+
+使用f'	{}{}'，作为格式化字符串。
+
+[python进度条库tqdm详解 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/163613814)
+
+with语法的作用其实就是一种Try-catch的简写形式。
+
+[python的with关键字 - 简书 (jianshu.com)](https://www.jianshu.com/p/5b01fb36fd4c)
+
+***
+
+我又发现了python的一个新特性
+
+```python
+for iteration, batch in enumerate(gen):
+            if iteration >= epoch_size:
+                break
+            images, targets = batch[0], batch[1]
+            with torch.no_grad():
+                if cuda:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor)).cuda()
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+                else:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor))
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+```
+
+注意到在enumerate（gen）的时候，有两个变量分割并接受数据，又注意到这个gen的数据来自于
+
+```python
+ gen = DataLoader(train_dataset, shuffle=True, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                                    drop_last=True, collate_fn=yolo_dataset_collate)
+```
+
+也即gen直接接收了两个数据，这两个数据来自于Dataloader。
+
+XXXX!
+
+Dataloader其实应该是一个枚举类，提供一个iter，供iter使用。
+
+iteration是枚举的次数，batch就是枚举出来的批数据。
+
+令images和targets分别取batch的第一个数据和第二个，因为我们记得在callable_fn中，自己定义了一个函数，将map分为了两个list。
+
+然后开始训练。
+
+```python
+with torch.no_grad():
+                if cuda:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor)).cuda()
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+                else:
+                    images = Variable(torch.from_numpy(images).type(torch.FloatTensor))
+                    targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+```
+
+`with torch.no_grad()`的意思是不需要在训练的时候计算梯度和进行反向传播。
+
+```python
+images = Variable(torch.from_numpy(images).type(torch.FloatTensor)).cuda()
+```
+
+将images转换为可以支持梯度计算的Variable变量形式，Variable和Tensor类似，按照官网说法是thin.wrapper。
+
+```python
+targets = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets]
+```
+
+因为一个image可以有很多的标记框，因此需要用列表存储。
+
+***
+
+然后就可以进行真正开始训练了。
+
+```python
+			#----------------------#
+            #   清零梯度
+            #----------------------#
+            optimizer.zero_grad()
+            #----------------------#
+            #   前向传播
+            #----------------------#
+            outputs = net(images)
+            losses = []
+            num_pos_all = 0
+            #----------------------#
+            #   计算损失
+            #----------------------#
+            for i in range(3):
+                loss_item, num_pos = yolo_losses[i](outputs[i], targets)
+                losses.append(loss_item)
+                num_pos_all += num_pos
+
+            loss = sum(losses) / num_pos_all
+            #----------------------#
+            #   反向传播
+            #----------------------#
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            
+            pbar.set_postfix(**{'total_loss': total_loss / (iteration + 1), 
+                                'lr'        : get_lr(optimizer)})
+            pbar.update(1)
+```
+
+首先将优化器的梯度清零，因为一开始的学习率应该比较低，然后逐步学习梯度，在training中途逐步调整学习率。
+
+然后进行前向传播，操作很简单
+
+```
+outputs = net(images)
+```
+
+接着开始计算损失，因为有三种精度的扫描，因此要计算三个精度下的总损失，和总的标记框数，然后求平均值。
+
+```python
+for i in range(3):
+                loss_item, num_pos = yolo_losses[i](outputs[i], targets)
+                losses.append(loss_item)
+                num_pos_all += num_pos
+
+            loss = sum(losses) / num_pos_all
+```
+
+```
+loss_item, num_pos = yolo_losses[i](outputs[i], targets)
+```
+
+因为YOLOloss类继承的是nn.Module，因此里面有定义的forward函数，这里进行前向推理以后，将计算得出的损失和标记框数返回，从而完成训练。
+
+这里的forward用到了很多的yolo_traning.py中的方法，在稍后会进行解释。
+
+```python
+loss.backward()
+optimizer.step()
+
+total_loss += loss.item()
+```
+
+这里我其实想了好久，为什么loss会有方法呢？
+
+原因是在计算sum(losses)的时候已经赋予了loss属性，losses中的元素是从yolo_losses中返回的是Variable变量，因此可以进行反向传递。
+
+更新优化器。
+
+****
+
+然后就是validation阶段
+
+```python
+ net.eval()
+    print('Start Validation')
+    with tqdm(total=epoch_size_val, desc=f'Epoch {epoch + 1}/{Epoch}',postfix=dict,mininterval=0.3) as pbar:
+        for iteration, batch in enumerate(genval):
+            if iteration >= epoch_size_val:
+                break
+            images_val, targets_val = batch[0], batch[1]
+
+            with torch.no_grad():
+                if cuda:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor)).cuda()
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                else:
+                    images_val = Variable(torch.from_numpy(images_val).type(torch.FloatTensor))
+                    targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
+                optimizer.zero_grad()
+                outputs = net(images_val)
+                losses = []
+                num_pos_all = 0
+                for i in range(3):
+                    loss_item, num_pos = yolo_losses[i](outputs[i], targets_val)
+                    losses.append(loss_item)
+                    num_pos_all += num_pos
+                loss = sum(losses) / num_pos_all
+                val_loss += loss.item()
+            pbar.set_postfix(**{'total_loss': val_loss / (iteration + 1)})
+            pbar.update(1)
+    print('Finish Validation')
+    print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
+    print('Total Loss: %.4f || Val Loss: %.4f ' % (total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+
+    print('Saving state, iter:', str(epoch+1))
+    torch.save(model.state_dict(), 'logs/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
+
+```
+
+其实和上面差不多，但是就是第一句话不一样
+
+```
+net.eval()
+```
+
+这样就锁住了Dropout层和BN层，简单解释
+
+> model的eval方法主要是针对某些在train和predict两个阶段会有不同参数的层。比如Dropout层和BN层
+>
+> Dropout在train时随机选择神经元而predict要使用全部神经元并且要乘一个补偿系数
+>
+> BN在train时每个batch做了不同的归一化因此也对应了不同的参数，相应predict时实际用的参数是每个batch下参数的移动平均。
+>
+> torch为了方便大家，设计这个eval方法就是让我们可以不用手动去针对这些层做predict阶段的处理(也可以叫evaluation阶段,所以这个方法名才是eval)
+>
+> 这也就是说，如果模型中用了dropout或bn，那么predict时必须使用eval 否则结果是没有参考价值的，不存在选择的余地。
+>
+> 
+>
+> 作者：蔺笑天
+> 链接：https://www.zhihu.com/question/363144860/answer/951669576
+> 来源：知乎
+> 著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+
+具体学习需要以后了。
+
+**至此，训练结束**
+
+#### 4. 进行预测
+
+##### 图片预测
+
+```python
+'''
+predict.py有几个注意点
+1、无法进行批量预测，如果想要批量预测，可以利用os.listdir()遍历文件夹，利用Image.open打开图片文件进行预测。
+2、如果想要保存，利用r_image.save("img.jpg")即可保存。
+3、如果想要获得框的坐标，可以进入detect_image函数，读取top,left,bottom,right这四个值。
+4、如果想要截取下目标，可以利用获取到的top,left,bottom,right这四个值在原图上利用矩阵的方式进行截取。
+'''
+from PIL import Image
+
+from yolo import YOLO
+
+yolo = YOLO()
+
+while True:
+    img = input('Input image filename:')
+    try:
+        image = Image.open(img)
+    except:
+        print('Open Error! Try again!')
+        continue
+    else:
+        r_image = yolo.detect_image(image)
+        r_image.show()
+
+```
+
+实例化yolo，然后加载图片，然后调用yolo.detect_image功能。
+
+在实例化yolo的时候，yolo类构造函数内部调用了其类成员函数generator
+
+```python
+ def generate(self):
+        self.config["yolo"]["classes"] = len(self.class_names)
+        #---------------------------------------------------#
+        #   建立yolov3模型
+        #---------------------------------------------------#
+        self.net = YoloBody(self.config)
+
+        #---------------------------------------------------#
+        #   载入yolov3模型的权重
+        #---------------------------------------------------#
+        print('Loading weights into state dict...')
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        state_dict = torch.load(self.model_path, map_location=device)
+        self.net.load_state_dict(state_dict)
+        self.net = self.net.eval()
+
+        if self.cuda:
+            os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+            self.net = nn.DataParallel(self.net)
+            self.net = self.net.cuda()
+
+        #---------------------------------------------------#
+        #   建立三个特征层解码用的工具
+        #---------------------------------------------------#
+        self.yolo_decodes = []
+        for i in range(3):
+            self.yolo_decodes.append(DecodeBox(self.config["yolo"]["anchors"][i], self.config["yolo"]["classes"], (self.model_image_size[1], self.model_image_size[0])))
+
+        print('{} model, anchors, and classes loaded.'.format(self.model_path))
+        # 画框设置不同的颜色
+        hsv_tuples = [(x / len(self.class_names), 1., 1.)
+                      for x in range(len(self.class_names))]
+        self.colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+        self.colors = list(
+            map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)),
+                self.colors))
+```
+
+前面的一些配置不是很重要，需要的时候再学习一下即可。
+
+最重要的是
+
+```python
+for i in range(3):
+            self.yolo_decodes.append(DecodeBox(self.config["yolo"]["anchors"][i], self.config["yolo"]["classes"], (self.model_image_size[1], self.model_image_size[0])))
+
+```
+
+这里，其实这里不是说很难，就是下面有一个很复杂的矩阵操作，需要注意一下。
+
+```python
+    #---------------------------------------------------#
+    #   检测图片
+    #---------------------------------------------------#
+    def detect_image(self, image):
+        image_shape = np.array(np.shape(image)[0:2])
+
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #---------------------------------------------------------#
+        crop_img = np.array(letterbox_image(image, (self.model_image_size[1],self.model_image_size[0])))
+        photo = np.array(crop_img,dtype = np.float32) / 255.0
+        photo = np.transpose(photo, (2, 0, 1))
+        #---------------------------------------------------------#
+        #   添加上batch_size维度
+        #---------------------------------------------------------#
+        images = [photo]
+
+        with torch.no_grad():
+            images = torch.from_numpy(np.asarray(images))
+            if self.cuda:
+                images = images.cuda()
+
+            #---------------------------------------------------------#
+            #   将图像输入网络当中进行预测！
+            #---------------------------------------------------------#
+            outputs = self.net(images)
+            output_list = []
+            for i in range(3):
+                output_list.append(self.yolo_decodes[i](outputs[i]))
+                
+            #---------------------------------------------------------#
+            #   将预测框进行堆叠，然后进行非极大抑制
+            #---------------------------------------------------------#
+            output = torch.cat(output_list, 1)
+            batch_detections = non_max_suppression(output, self.config["yolo"]["classes"],
+                                                    conf_thres=self.confidence,
+                                                    nms_thres=self.iou)
+                                                    
+            #---------------------------------------------------------#
+            #   如果没有检测出物体，返回原图
+            #---------------------------------------------------------#
+            try :
+                batch_detections = batch_detections[0].cpu().numpy()
+            except:
+                return image
+
+            #---------------------------------------------------------#
+            #   对预测框进行得分筛选
+            #---------------------------------------------------------#
+            top_index = batch_detections[:,4] * batch_detections[:,5] > self.confidence
+            top_conf = batch_detections[top_index,4]*batch_detections[top_index,5]
+            top_label = np.array(batch_detections[top_index,-1],np.int32)
+            top_bboxes = np.array(batch_detections[top_index,:4])
+            top_xmin, top_ymin, top_xmax, top_ymax = np.expand_dims(top_bboxes[:,0],-1),np.expand_dims(top_bboxes[:,1],-1),np.expand_dims(top_bboxes[:,2],-1),np.expand_dims(top_bboxes[:,3],-1)
+
+            #-----------------------------------------------------------------#
+            #   在图像传入网络预测前会进行letterbox_image给图像周围添加灰条
+            #   因此生成的top_bboxes是相对于有灰条的图像的
+            #   我们需要对其进行修改，去除灰条的部分。
+            #-----------------------------------------------------------------#
+            boxes = yolo_correct_boxes(top_ymin,top_xmin,top_ymax,top_xmax,np.array([self.model_image_size[0],self.model_image_size[1]]),image_shape)
+
+        font = ImageFont.truetype(font='model_data/simhei.ttf',size=np.floor(3e-2 * np.shape(image)[1] + 0.5).astype('int32'))
+
+        thickness = max((np.shape(image)[0] + np.shape(image)[1]) // self.model_image_size[0], 1)
+
+        for i, c in enumerate(top_label):
+            predicted_class = self.class_names[c]
+            score = top_conf[i]
+
+            top, left, bottom, right = boxes[i]
+            top = top - 5
+            left = left - 5
+            bottom = bottom + 5
+            right = right + 5
+
+            top = max(0, np.floor(top + 0.5).astype('int32'))
+            left = max(0, np.floor(left + 0.5).astype('int32'))
+            bottom = min(np.shape(image)[0], np.floor(bottom + 0.5).astype('int32'))
+            right = min(np.shape(image)[1], np.floor(right + 0.5).astype('int32'))
+
+            # 画框框
+            label = '{} {:.2f}'.format(predicted_class, score)
+            draw = ImageDraw.Draw(image)
+            label_size = draw.textsize(label, font)
+            label = label.encode('utf-8')
+            print(label, top, left, bottom, right)
+            
+            if top - label_size[1] >= 0:
+                text_origin = np.array([left, top - label_size[1]])
+            else:
+                text_origin = np.array([left, top + 1])
+
+            for i in range(thickness):
+                draw.rectangle(
+                    [left + i, top + i, right - i, bottom - i],
+                    outline=self.colors[self.class_names.index(predicted_class)])
+            draw.rectangle(
+                [tuple(text_origin), tuple(text_origin + label_size)],
+                fill=self.colors[self.class_names.index(predicted_class)])
+            draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
+            del draw
+        return image
+```
+
+先取出图片的长宽高信息
+
+```python
+image_shape = np.array(np.shape(image)[0:2])
+```
+
+然后在图像周围加上灰条，保证图像不会失真
+
+```python
+crop_img = np.array(letterbox_image(image, (self.model_image_size[1],self.model_image_size[0])))
+```
+
+具体的方法为：
+
+```python
+def letterbox_image(image, size):
+    iw, ih = image.size
+    w, h = size
+    scale = min(w/iw, h/ih)
+    nw = int(iw*scale)
+    nh = int(ih*scale)
+
+    image = image.resize((nw,nh), Image.BICUBIC)
+    new_image = Image.new('RGB', size, (128,128,128))
+    new_image.paste(image, ((w-nw)//2, (h-nh)//2))
+    return new_image
+```
+
+` image = image.resize((nw,nh), Image.BICUBIC)`这句话将图像进行分辨率调整以及进行插值处理，具体为双立方插值，这个我不太懂，应该数字图像处理课会学到。
+
+然后就新建一个图层，染成灰色，将调整后的图像覆盖在其上。
+
+将图像的数据归一化，然后再将其转置
+
+```python
+photo = np.array(crop_img,dtype = np.float32) / 255.0
+photo = np.transpose(photo, (2, 0, 1))
+```
+
+使用（2，0，1）排布的目的是为了将图像的通道数放在最前面，然后是宽高
+
+和之前一样进行推理
+
+```python
+with torch.no_grad():
+            images = torch.from_numpy(np.asarray(images))
+            if self.cuda:
+                images = images.cuda()
+
+            #---------------------------------------------------------#
+            #   将图像输入网络当中进行预测！
+            #---------------------------------------------------------#
+            outputs = self.net(images)
+            output_list = []
+            for i in range(3):
+                output_list.append(self.yolo_decodes[i](outputs[i]))
+```
+
+
+
+```python
+#---------------------------------------------------------#
+#   将预测框进行堆叠，然后进行非极大抑制
+#---------------------------------------------------------#
+output = torch.cat(output_list, 1)
+batch_detections = non_max_suppression(output, self.config["yolo"]["classes"],conf_thres=self.confidence,nms_thres=self.iou)
+```
+
+`torch.cat( ,1)`按照1维拼接，也即将输出的标记框横着拼起来
+
+然后进行非极大抑制
+
+```python
+def non_max_suppression(prediction, num_classes, conf_thres=0.5, nms_thres=0.4):
+    #----------------------------------------------------------#
+    #   将预测结果的格式转换成左上角右下角的格式。
+    #   prediction  [batch_size, num_anchors, 85]
+    #----------------------------------------------------------#
+    box_corner = prediction.new(prediction.shape)
+    box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+    box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+    box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+    box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+    prediction[:, :, :4] = box_corner[:, :, :4]
+
+    output = [None for _ in range(len(prediction))]
+    for image_i, image_pred in enumerate(prediction):
+        #----------------------------------------------------------#
+        #   对种类预测部分取max。
+        #   class_conf  [num_anchors, 1]    种类置信度
+        #   class_pred  [num_anchors, 1]    种类
+        #----------------------------------------------------------#
+        class_conf, class_pred = torch.max(image_pred[:, 5:5 + num_classes], 1, keepdim=True)
+
+        #----------------------------------------------------------#
+        #   利用置信度进行第一轮筛选
+        #----------------------------------------------------------#
+        conf_mask = (image_pred[:, 4] * class_conf[:, 0] >= conf_thres).squeeze()
+
+        #----------------------------------------------------------#
+        #   根据置信度进行预测结果的筛选
+        #----------------------------------------------------------#
+        image_pred = image_pred[conf_mask]
+        class_conf = class_conf[conf_mask]
+        class_pred = class_pred[conf_mask]
+        if not image_pred.size(0):
+            continue
+        #-------------------------------------------------------------------------#
+        #   detections  [num_anchors, 7]
+        #   7的内容为：x1, y1, x2, y2, obj_conf, class_conf, class_pred
+        #-------------------------------------------------------------------------#
+        detections = torch.cat((image_pred[:, :5], class_conf.float(), class_pred.float()), 1)
+
+        #------------------------------------------#
+        #   获得预测结果中包含的所有种类
+        #------------------------------------------#
+        unique_labels = detections[:, -1].cpu().unique()
+
+        if prediction.is_cuda:
+            unique_labels = unique_labels.cuda()
+            detections = detections.cuda()
+
+        for c in unique_labels:
+            #------------------------------------------#
+            #   获得某一类得分筛选后全部的预测结果
+            #------------------------------------------#
+            detections_class = detections[detections[:, -1] == c]
+
+            #------------------------------------------#
+            #   使用官方自带的非极大抑制会速度更快一些！
+            #------------------------------------------#
+            keep = nms(
+                detections_class[:, :4],
+                detections_class[:, 4] * detections_class[:, 5],
+                nms_thres
+            )
+            max_detections = detections_class[keep]
+            
+            # # 按照存在物体的置信度排序
+            # _, conf_sort_index = torch.sort(detections_class[:, 4]*detections_class[:, 5], descending=True)
+            # detections_class = detections_class[conf_sort_index]
+            # # 进行非极大抑制
+            # max_detections = []
+            # while detections_class.size(0):
+            #     # 取出这一类置信度最高的，一步一步往下判断，判断重合程度是否大于nms_thres，如果是则去除掉
+            #     max_detections.append(detections_class[0].unsqueeze(0))
+            #     if len(detections_class) == 1:
+            #         break
+            #     ious = bbox_iou(max_detections[-1], detections_class[1:])
+            #     detections_class = detections_class[1:][ious < nms_thres]
+            # # 堆叠
+            # max_detections = torch.cat(max_detections).data
+            
+            # Add max detections to outputs
+            output[image_i] = max_detections if output[image_i] is None else torch.cat(
+                (output[image_i], max_detections))
+
+    return output
+```
+
+非极大抑制函数接受的参数分别为推理后得出的标记框、物体种类、置信度的阈值、非极大抑制的阈值
+
+````python
+def non_max_suppression(prediction, num_classes, conf_thres=0.5, nms_thres=0.4):
+````
+
+调整一下图像的坐标系
+
+```python
+#----------------------------------------------------------#
+#   将预测结果的格式转换成左上角右下角的格式。
+#   prediction  [batch_size, num_anchors, 85]
+#----------------------------------------------------------#
+box_corner = prediction.new(prediction.shape)
+box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+prediction[:, :, :4] = box_corner[:, :, :4]
+```
+
+这里，非极大抑制函数接受的第一个参数来自于caller函数的output_list，其内部包含了yolo_decode()返回的数据
+
+```python
+for i in range(3):
+                output_list.append(self.yolo_decodes[i](outputs[i]))
+```
+
+而yolo_decode由下面的语句生成，也即在列表里放入了一个DecodeBox的实例
+
+```python
+self.yolo_decodes.append(DecodeBox(self.config["yolo"]["anchors"][i], self.config["yolo"]["classes"], (self.model_image_size[1], self.model_image_size[0])))
+```
+
+DecodeBox：
+
+```python
+class DecodeBox(nn.Module):
+    def __init__(self, anchors, num_classes, img_size):
+        super(DecodeBox, self).__init__()
+        #-----------------------------------------------------------#
+        #   13x13的特征层对应的anchor是[116,90],[156,198],[373,326]
+        #   26x26的特征层对应的anchor是[30,61],[62,45],[59,119]
+        #   52x52的特征层对应的anchor是[10,13],[16,30],[33,23]
+        #-----------------------------------------------------------#
+        self.anchors = anchors
+        self.num_anchors = len(anchors)
+        self.num_classes = num_classes
+        self.bbox_attrs = 5 + num_classes
+        self.img_size = img_size
+
+    def forward(self, input):
+        #-----------------------------------------------#
+        #   输入的input一共有三个，他们的shape分别是
+        #   batch_size, 255, 13, 13
+        #   batch_size, 255, 26, 26
+        #   batch_size, 255, 52, 52
+        #-----------------------------------------------#
+        batch_size = input.size(0)
+        input_height = input.size(2)
+        input_width = input.size(3)
+
+        #-----------------------------------------------#
+        #   输入为416x416时
+        #   stride_h = stride_w = 32、16、8
+        #-----------------------------------------------#
+        stride_h = self.img_size[1] / input_height
+        stride_w = self.img_size[0] / input_width
+        #-------------------------------------------------#
+        #   此时获得的scaled_anchors大小是相对于特征层的
+        #-------------------------------------------------#
+        scaled_anchors = [(anchor_width / stride_w, anchor_height / stride_h) for anchor_width, anchor_height in self.anchors]
+
+        #-----------------------------------------------#
+        #   输入的input一共有三个，他们的shape分别是
+        #   batch_size, 3, 13, 13, 85
+        #   batch_size, 3, 26, 26, 85
+        #   batch_size, 3, 52, 52, 85
+        #-----------------------------------------------#
+        prediction = input.view(batch_size, self.num_anchors,
+                                self.bbox_attrs, input_height, input_width).permute(0, 1, 3, 4, 2).contiguous()
+
+        # 先验框的中心位置的调整参数
+        x = torch.sigmoid(prediction[..., 0])  
+        y = torch.sigmoid(prediction[..., 1])
+        # 先验框的宽高调整参数
+        w = prediction[..., 2]
+        h = prediction[..., 3]
+        # 获得置信度，是否有物体
+        conf = torch.sigmoid(prediction[..., 4])
+        # 种类置信度
+        pred_cls = torch.sigmoid(prediction[..., 5:])
+
+        FloatTensor = torch.cuda.FloatTensor if x.is_cuda else torch.FloatTensor
+        LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
+
+        #----------------------------------------------------------#
+        #   生成网格，先验框中心，网格左上角 
+        #   batch_size,3,13,13
+        #----------------------------------------------------------#
+        grid_x = torch.linspace(0, input_width - 1, input_width).repeat(input_height, 1).repeat(
+            batch_size * self.num_anchors, 1, 1).view(x.shape).type(FloatTensor)
+        grid_y = torch.linspace(0, input_height - 1, input_height).repeat(input_width, 1).t().repeat(
+            batch_size * self.num_anchors, 1, 1).view(y.shape).type(FloatTensor)
+
+        #----------------------------------------------------------#
+        #   按照网格格式生成先验框的宽高
+        #   batch_size,3,13,13
+        #----------------------------------------------------------#
+        anchor_w = FloatTensor(scaled_anchors).index_select(1, LongTensor([0]))
+        anchor_h = FloatTensor(scaled_anchors).index_select(1, LongTensor([1]))
+        anchor_w = anchor_w.repeat(batch_size, 1).repeat(1, 1, input_height * input_width).view(w.shape)
+        anchor_h = anchor_h.repeat(batch_size, 1).repeat(1, 1, input_height * input_width).view(h.shape)
+
+        #----------------------------------------------------------#
+        #   利用预测结果对先验框进行调整
+        #   首先调整先验框的中心，从先验框中心向右下角偏移
+        #   再调整先验框的宽高。
+        #----------------------------------------------------------#
+        pred_boxes = FloatTensor(prediction[..., :4].shape)
+        pred_boxes[..., 0] = x.data + grid_x
+        pred_boxes[..., 1] = y.data + grid_y
+        pred_boxes[..., 2] = torch.exp(w.data) * anchor_w
+        pred_boxes[..., 3] = torch.exp(h.data) * anchor_h
+
+        #----------------------------------------------------------#
+        #   将输出结果调整成相对于输入图像大小
+        #----------------------------------------------------------#
+        _scale = torch.Tensor([stride_w, stride_h] * 2).type(FloatTensor)
+        output = torch.cat((pred_boxes.view(batch_size, -1, 4) * _scale,
+                            conf.view(batch_size, -1, 1), pred_cls.view(batch_size, -1, self.num_classes)), -1)
+        return output.data
+```
+
+同样可以看出，这个类继承了nn.Module。
+
+```python
+class DecodeBox(nn.Module):
+```
+
+因此也不难理解为什么可以向一个实例直接输入数据而不指定调用何等方法就可以获得返回值了
+
+[(8条消息) pytorch 中的 forward 的使用与解释_JY丫丫-CSDN博客](https://blog.csdn.net/xu380393916/article/details/97280035)
+
+这个博文刚好解释了这一点
+
+这是因为在父类中定义了可以直接调用指定函数的方法_ _caller_ _方法
+
+接着看看forward函数
+
+```python
+    def forward(self, input):
+        #-----------------------------------------------#
+        #   输入的input一共有三个，他们的shape分别是
+        #   batch_size, 255, 13, 13
+        #   batch_size, 255, 26, 26
+        #   batch_size, 255, 52, 52
+        #-----------------------------------------------#
+        batch_size = input.size(0)
+        input_height = input.size(2)
+        input_width = input.size(3)
+```
+
+函数的参数input是经过神经网络的卷积以后输出的张量（图像卷积后的张量）
+
+张量的结构依次为进行批处理的图像的数目、信道数量、图像的长和宽。
+
+***
+
+将步长设置设置为符合比例的长度
+
+```python
+ #-----------------------------------------------#
+ #   输入为416x416时
+ #   stride_h = stride_w = 32、16、8
+ #-----------------------------------------------#
+ stride_h = self.img_size[1] / input_height
+ stride_w = self.img_size[0] / input_width
+```
+
+将标记框也进行缩放
+
+```python
+#-------------------------------------------------#
+#   此时获得的scaled_anchors大小是相对于特征层的
+#-------------------------------------------------#
+scaled_anchors = [(anchor_width / stride_w, anchor_height / stride_h) for anchor_width, anchor_height in self.anchors]
+```
+
+将张量重组，使三种精度的标记框在前，接着是属性，接着是图像宽高，这样主要是达到将信道拆分成3*85的目的
+
+```python
+#-----------------------------------------------#
+#   输入的input一共有三个，他们的shape分别是
+#   batch_size, 3, 13, 13, 85
+#   batch_size, 3, 26, 26, 85
+#   batch_size, 3, 52, 52, 85
+#-----------------------------------------------#
+prediction = input.view(batch_size, self.num_anchors,
+                        self.bbox_attrs, input_height, input_width).permute(0, 1, 3, 4, 2).contiguous()
+```
+
+[(8条消息) python - .view()_qq_33775807的博客-CSDN博客_python view](https://blog.csdn.net/qq_33775807/article/details/102565410)
+
+上面的文章展示了view的用处
+
+然后进行permute排列，这样将属性移到最后
+
+contiguous函数可以做到将重新排列后的数据在内存中整齐排布
+
+
+
+![image-20210203172731302](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210203172740.png)
+
+![image-20210203191050969](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210203191053.png)
+
+这里我被一个博客误导了。
+
+```python
+A[...:0]#表示省略前面的所有维度，取最后一维的第一个数字
+A[:,0]#表示省略第一维，也即去除第一重括号，剩下的括号内的元素就是答案
+#我觉得可以理解为...省略了一系列的:,:,;,:,操作
+```
+
+这样就可以解释
+
+```python
+# 先验框的中心位置的调整参数
+x = torch.sigmoid(prediction[..., 0])  
+y = torch.sigmoid(prediction[..., 1])
+# 先验框的宽高调整参数
+w = prediction[..., 2]
+h = prediction[..., 3]
+# 获得置信度，是否有物体
+conf = torch.sigmoid(prediction[..., 4])
+# 种类置信度
+pred_cls = torch.sigmoid(prediction[..., 5:])
+```
+
+的操作了
+
+因为在前面的操作，bbox_attrs的数值所分割的部分被移到了最后，因此prediction[..., 0]省略了前面的所有维数，取bbox_attrs这个一维数组的数据分别作为先验框的中心位置、先验框的比例参数，用来调整初始的先验框的大小，然后是置信度，从第五个以后，剩下的都是对于物体种类的判断。
+
+***
+
+剩下的一些矩阵操作就不仔细研究了，等需要的时候再研究，先把他列出来
+
+```python
+
+        FloatTensor = torch.cuda.FloatTensor if x.is_cuda else torch.FloatTensor
+        LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
+
+        #----------------------------------------------------------#
+        #   生成网格，先验框中心，网格左上角 
+        #   batch_size,3,13,13
+        #----------------------------------------------------------#
+        grid_x = torch.linspace(0, input_width - 1, input_width).repeat(input_height, 1).repeat(
+            batch_size * self.num_anchors, 1, 1).view(x.shape).type(FloatTensor)
+        grid_y = torch.linspace(0, input_height - 1, input_height).repeat(input_width, 1).t().repeat(
+            batch_size * self.num_anchors, 1, 1).view(y.shape).type(FloatTensor)
+
+        #----------------------------------------------------------#
+        #   按照网格格式生成先验框的宽高
+        #   batch_size,3,13,13
+        #----------------------------------------------------------#
+        anchor_w = FloatTensor(scaled_anchors).index_select(1, LongTensor([0]))
+        anchor_h = FloatTensor(scaled_anchors).index_select(1, LongTensor([1]))
+        anchor_w = anchor_w.repeat(batch_size, 1).repeat(1, 1, input_height * input_width).view(w.shape)
+        anchor_h = anchor_h.repeat(batch_size, 1).repeat(1, 1, input_height * input_width).view(h.shape)
+
+        #----------------------------------------------------------#
+        #   利用预测结果对先验框进行调整
+        #   首先调整先验框的中心，从先验框中心向右下角偏移
+        #   再调整先验框的宽高。
+        #----------------------------------------------------------#
+        pred_boxes = FloatTensor(prediction[..., :4].shape)
+        pred_boxes[..., 0] = x.data + grid_x
+        pred_boxes[..., 1] = y.data + grid_y
+        pred_boxes[..., 2] = torch.exp(w.data) * anchor_w
+        pred_boxes[..., 3] = torch.exp(h.data) * anchor_h
+
+        #----------------------------------------------------------#
+        #   将输出结果调整成相对于输入图像大小
+        #----------------------------------------------------------#
+        _scale = torch.Tensor([stride_w, stride_h] * 2).type(FloatTensor)
+        output = torch.cat((pred_boxes.view(batch_size, -1, 4) * _scale,
+                            conf.view(batch_size, -1, 1), pred_cls.view(batch_size, -1, self.num_classes)), -1)
+        return output.data
+```
+
+结束了DecodeBox类的研究，下面回到yolo.py类
+
+****
+
+```python
+#---------------------------------------------------------#
+#   将图像输入网络当中进行预测！
+#---------------------------------------------------------#
+outputs = self.net(images)
+output_list = []
+for i in range(3):
+    output_list.append(self.yolo_decodes[i](outputs[i]))
+```
+
+这里output_list收到的就是用张量形式表示的标记框
+
+下面就真的要进行非极大值抑制了
+
+```python
+output = torch.cat(output_list, 1)
+batch_detections = non_max_suppression(output, self.config["yolo"]["classes"],
+                                           conf_thres=self.confidence,
+                                           nms_thres=self.iou)
+```
+
+为什么要进行非极大值抑制呢？
+
+这个我想了很久，才明白
+
+在三种精度模式下，
+
+13*13个grid的每个网格都有三个大小的先验框
+
+26*26个grid的每个网格都有三个大小的先验框
+
+26*26个grid的每个网格都有三个大小的先验框
+
+因此有很多的先验框
+
+但这不是重点，因为这里是调用已经训练好的模型，这种模型在多数情况不会给没有目标的物体所在的网格处给出预测框
+
+但是对于一个比较大的物体，无论是在同一种精度下还是在不同精度的同一个区域附近，都会产生重复，因此这里就是为了选出最能覆盖该物体的预测框
+
+```python
+def non_max_suppression(prediction, num_classes, conf_thres=0.5, nms_thres=0.4):
+    #----------------------------------------------------------#
+    #   将预测结果的格式转换成左上角右下角的格式。
+    #   prediction  [batch_size, num_anchors, 85]
+    #----------------------------------------------------------#
+    box_corner = prediction.new(prediction.shape)
+    box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+    box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+    box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+    box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+    prediction[:, :, :4] = box_corner[:, :, :4]
+
+    output = [None for _ in range(len(prediction))]
+    for image_i, image_pred in enumerate(prediction):
+        #----------------------------------------------------------#
+        #   对种类预测部分取max。
+        #   class_conf  [num_anchors, 1]    种类置信度
+        #   class_pred  [num_anchors, 1]    种类
+        #----------------------------------------------------------#
+        class_conf, class_pred = torch.max(image_pred[:, 5:5 + num_classes], 1, keepdim=True)
+
+        #----------------------------------------------------------#
+        #   利用置信度进行第一轮筛选
+        #----------------------------------------------------------#
+        conf_mask = (image_pred[:, 4] * class_conf[:, 0] >= conf_thres).squeeze()
+
+        #----------------------------------------------------------#
+        #   根据置信度进行预测结果的筛选
+        #----------------------------------------------------------#
+        image_pred = image_pred[conf_mask]
+        class_conf = class_conf[conf_mask]
+        class_pred = class_pred[conf_mask]
+        if not image_pred.size(0):
+            continue
+        #-------------------------------------------------------------------------#
+        #   detections  [num_anchors, 7]
+        #   7的内容为：x1, y1, x2, y2, obj_conf, class_conf, class_pred
+        #-------------------------------------------------------------------------#
+        detections = torch.cat((image_pred[:, :5], class_conf.float(), class_pred.float()), 1)
+
+        #------------------------------------------#
+        #   获得预测结果中包含的所有种类
+        #------------------------------------------#
+        unique_labels = detections[:, -1].cpu().unique()
+
+        if prediction.is_cuda:
+            unique_labels = unique_labels.cuda()
+            detections = detections.cuda()
+
+        for c in unique_labels:
+            #------------------------------------------#
+            #   获得某一类得分筛选后全部的预测结果
+            #------------------------------------------#
+            detections_class = detections[detections[:, -1] == c]
+
+            #------------------------------------------#
+            #   使用官方自带的非极大抑制会速度更快一些！
+            #------------------------------------------#
+            keep = nms(
+                detections_class[:, :4],
+                detections_class[:, 4] * detections_class[:, 5],
+                nms_thres
+            )
+            max_detections = detections_class[keep]
+            
+            # # 按照存在物体的置信度排序
+            # _, conf_sort_index = torch.sort(detections_class[:, 4]*detections_class[:, 5], descending=True)
+            # detections_class = detections_class[conf_sort_index]
+            # # 进行非极大抑制
+            # max_detections = []
+            # while detections_class.size(0):
+            #     # 取出这一类置信度最高的，一步一步往下判断，判断重合程度是否大于nms_thres，如果是则去除掉
+            #     max_detections.append(detections_class[0].unsqueeze(0))
+            #     if len(detections_class) == 1:
+            #         break
+            #     ious = bbox_iou(max_detections[-1], detections_class[1:])
+            #     detections_class = detections_class[1:][ious < nms_thres]
+            # # 堆叠
+            # max_detections = torch.cat(max_detections).data
+            
+            # Add max detections to outputs
+            output[image_i] = max_detections if output[image_i] is None else torch.cat(
+                (output[image_i], max_detections))
+    return output
+```
+
+下面进行逐步分析：
+
+```
+prediction = input.view(batch_size, self.num_anchors,
+                                self.bbox_attrs, input_height, input_width).permute(0, 1, 3, 4, 2).contiguous()
+```
+
+注意到这里，经过调整以后，batch_size部分作为第一维，num_anchors作为第二维
+
+```python
+#----------------------------------------------------------#
+#   将预测结果的格式转换成左上角右下角的格式。
+#   prediction  [batch_size, num_anchors, 85]
+#----------------------------------------------------------#
+box_corner = prediction.new(prediction.shape)
+box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+prediction[:, :, :4] = box_corner[:, :, :4]
+```
+
+因此这里的`prediction[:, :, 0]`就是从去除了两个维度，的input_heigin的值，`prediction[:, :, 1]`就是input_width，
+
+接下来的`prediction[:, :, :4] = box_corner[:, :, :4]`则表示将其他的值直接复制过去。
+
+有没有注意到
+
+```python
+prediction[:, :, 2]
+prediction[:, :, 3]
+```
+
+这两个分别对应去除掉两个维度后的第2、3个元素就是预选框的长宽
+
+使用box_corner暂存以后，
+
+```python
+prediction[:, :, :4] = box_corner[:, :, :4]
+```
+
+将这前四个变动过的值归还prediction
+
+
+
+接下来的部分我实在是看不懂了
+
+```python
+output = [None for _ in range(len(prediction))]
+for image_i, image_pred in enumerate(prediction):
+    #----------------------------------------------------------#
+    #   对种类预测部分取max。
+    #   class_conf  [num_anchors, 1]    种类置信度
+    #   class_pred  [num_anchors, 1]    种类
+    #----------------------------------------------------------#
+    class_conf, class_pred = torch.max(image_pred[:, 5:5 + num_classes], 1, keepdim=True)
+
+    #----------------------------------------------------------#
+    #   利用置信度进行第一轮筛选
+    #----------------------------------------------------------#
+    conf_mask = (image_pred[:, 4] * class_conf[:, 0] >= conf_thres).squeeze()
+
+    #----------------------------------------------------------#
+    #   根据置信度进行预测结果的筛选
+    #----------------------------------------------------------#
+    image_pred = image_pred[conf_mask]
+    class_conf = class_conf[conf_mask]
+    class_pred = class_pred[conf_mask]
+    if not image_pred.size(0):
+        continue
+        #-------------------------------------------------------------------------#
+        #   detections  [num_anchors, 7]
+        #   7的内容为：x1, y1, x2, y2, obj_conf, class_conf, class_pred
+        #-------------------------------------------------------------------------#
+        detections = torch.cat((image_pred[:, :5], class_conf.float(), class_pred.float()), 1)
+
+        #------------------------------------------#
+        #   获得预测结果中包含的所有种类
+        #------------------------------------------#
+        unique_labels = detections[:, -1].cpu().unique()
+
+        if prediction.is_cuda:
+            unique_labels = unique_labels.cuda()
+            detections = detections.cuda()
+
+            for c in unique_labels:
+                #------------------------------------------#
+                #   获得某一类得分筛选后全部的预测结果
+                #------------------------------------------#
+                detections_class = detections[detections[:, -1] == c]
+
+                #------------------------------------------#
+                #   使用官方自带的非极大抑制会速度更快一些！
+                #------------------------------------------#
+                keep = nms(
+                    detections_class[:, :4],
+                    detections_class[:, 4] * detections_class[:, 5],
+                    nms_thres
+                )
+                max_detections = detections_class[keep]
+
+                # # 按照存在物体的置信度排序
+                # _, conf_sort_index = torch.sort(detections_class[:, 4]*detections_class[:, 5], descending=True)
+                # detections_class = detections_class[conf_sort_index]
+                # # 进行非极大抑制
+                # max_detections = []
+                # while detections_class.size(0):
+                #     # 取出这一类置信度最高的，一步一步往下判断，判断重合程度是否大于nms_thres，如果是则去除掉
+                #     max_detections.append(detections_class[0].unsqueeze(0))
+                #     if len(detections_class) == 1:
+                #         break
+                #     ious = bbox_iou(max_detections[-1], detections_class[1:])
+                #     detections_class = detections_class[1:][ious < nms_thres]
+                # # 堆叠
+                # max_detections = torch.cat(max_detections).data
+
+                # Add max detections to outputs
+                output[image_i] = max_detections if output[image_i] is None else torch.cat(
+                    (output[image_i], max_detections))
+
+                return output
+```
+
+****
+
+返回以后，回到yolo的detect_image函数
+
+```python
+#---------------------------------------------------------#
+#   对预测框进行得分筛选
+#---------------------------------------------------------#
+top_index = batch_detections[:,4] * batch_detections[:,5] > self.confidence
+top_conf = batch_detections[top_index,4]*batch_detections[top_index,5]
+top_label = np.array(batch_detections[top_index,-1],np.int32)
+top_bboxes = np.array(batch_detections[top_index,:4])
+top_xmin, top_ymin, top_xmax, top_ymax = np.expand_dims(top_bboxes[:,0],-1),np.expand_dims(top_bboxes[:,1],-1),np.expand_dims(top_bboxes[:,2],-1),np.expand_dims(top_bboxes[:,3],-1)
+```
+
+同样，我还是看不懂，我实在是不知道像
+
+```
+for image_i, image_pred in enumerate(prediction):
+```
+
+```
+class_conf, class_pred = torch.max(image_pred[:, 5:5 + num_classes], 1, keepdim=True)
+```
+
+这样的赋值是怎么完成的，以及
+
+```
+batch_detections[:,4] * batch_detections[:,5] 
+```
+
+里面的4、5代表了什么
+
+这个等我完全有功夫以后再说吧
+
+***
+
+```python
+#-----------------------------------------------------------------#
+#   在图像传入网络预测前会进行letterbox_image给图像周围添加灰条
+#   因此生成的top_bboxes是相对于有灰条的图像的
+#   我们需要对其进行修改，去除灰条的部分。
+#-----------------------------------------------------------------#
+boxes = yolo_correct_boxes(top_ymin,top_xmin,top_ymax,top_xmax,np.array([self.model_image_size[0],self.model_image_size[1]]),image_shape)
+```
+
+这个函数就是将添加的灰条删掉。
+
+***
+
+```python
+font = ImageFont.truetype(font='model_data/simhei.ttf',size=np.floor(3e-2 * np.shape(image)[1] + 0.5).astype('int32'))
+
+        thickness = max((np.shape(image)[0] + np.shape(image)[1]) // self.model_image_size[0], 1)
+
+        for i, c in enumerate(top_label):
+            predicted_class = self.class_names[c]
+            score = top_conf[i]
+
+            top, left, bottom, right = boxes[i]
+            top = top - 5
+            left = left - 5
+            bottom = bottom + 5
+            right = right + 5
+
+            top = max(0, np.floor(top + 0.5).astype('int32'))
+            left = max(0, np.floor(left + 0.5).astype('int32'))
+            bottom = min(np.shape(image)[0], np.floor(bottom + 0.5).astype('int32'))
+            right = min(np.shape(image)[1], np.floor(right + 0.5).astype('int32'))
+
+            # 画框框
+            label = '{} {:.2f}'.format(predicted_class, score)
+            draw = ImageDraw.Draw(image)
+            label_size = draw.textsize(label, font)
+            label = label.encode('utf-8')
+            print(label, top, left, bottom, right)
+            
+            if top - label_size[1] >= 0:
+                text_origin = np.array([left, top - label_size[1]])
+            else:
+                text_origin = np.array([left, top + 1])
+
+            for i in range(thickness):
+                draw.rectangle(
+                    [left + i, top + i, right - i, bottom - i],
+                    outline=self.colors[self.class_names.index(predicted_class)])
+            draw.rectangle(
+                [tuple(text_origin), tuple(text_origin + label_size)],
+                fill=self.colors[self.class_names.index(predicted_class)])
+            draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
+            del draw
+        return image
+
+```
+
+这是绘图函数，就不多赘述了。
+
+### 总结
+
+通过好几天的研读，今天总算是把代码和背后的思路搞懂了许多，但是有很多的矩阵操作我不是很明白，比如最后的部分我就没有继续展开讨论，等我有时间、系统地学一下python的切片机制、numpy的基本用法再回过头来看吧。因为说实在的，各种张量传来传去、各种切分、重拍，弄得我十分糊涂。还有就是utils.py和yolo_training.py里面有一些函数我没展开研究，主要也是因为矩阵操作太复杂了，这些代码应该是不需要熟练掌握，就会调用就可以了，或者想提升自己到时候再回去看看吧，不过按照我的惰性，这应该是不可能了。
+
+通过这次学习，习得了很多的python语法特性、深度学习的细节问题、pytorch库的使用和矩阵操作，获益匪浅。
+
+
 
 
 
