@@ -1,8 +1,10 @@
-idx: 1
+## swap
 
-ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_Shared.h
+### idx: 1
 
-combineVoxelDepthInformation()
+#### ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_Shared.h
+
+#### combineVoxelDepthInformation()
 
 用途：更新TSDF的每个体素的权重和TSDF值。newW、newF就是权重和TSDF值的意思。
 
@@ -29,11 +31,11 @@ _CPU_AND_GPU_CODE_ inline void combineVoxelDepthInformation(const CONSTPTR(TVoxe
 
 
 
-idx: 2
+### idx: 2
 
-ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
+#### ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
 
-IntegrateGlobalIntoLocal()
+#### IntegrateGlobalIntoLocal()
 
 用途：因为InfiniTAM采用了将体素块分批处理的方式，全局数组存放在更大的存储空间中（目前还没摸清是什么, 就先理解为host中存储），device中存储的是局部的体素块，局部的体素块处理完以后，需要和全局的对应的体素块进行融合。
 
@@ -123,11 +125,11 @@ for (int i = 0; i < noNeededEntries; i++)
 
 
 
-idx: 3
+### idx: 3
 
-ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
+#### ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
 
-LoadFromGlobalMemory()
+#### LoadFromGlobalMemory()
 
 用途：检查全局数组中同步过的块，进行再次同步。这就是论文中的swapin的过程
 
@@ -174,12 +176,125 @@ if (noNeededEntries > 0)
 
 
 
-idx：4
+### idx：4
 
+#### ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
 
+#### SaveToGlobalMemory（）
+
+功能:实现了swapout的功能
 
 ```
 template<class TVoxel>
 void ITMSwappingEngine_CPU<TVoxel, ITMVoxelBlockHash>::SaveToGlobalMemory(ITMScene<TVoxel, ITMVoxelBlockHash> *scene, ITMRenderState *renderState)
 ```
+
+首先同样遍历每个全局数组中的块，看看是否满足swapState为2，即仅在device中需要保存，以及localPtr>0，即保证能够通过哈希表找到局部数组的块，以及entriesVisibletype为0*（这个我猜测是判断如果一个体素块被表面包裹的话，就没有被更新，没必要存回host，待解决）*
+
+```
+for (int entryDestId = 0; entryDestId < noTotalEntries; entryDestId++)
+	{
+		if (noNeededEntries >= SDF_TRANSFER_BLOCK_NUM) break;
+
+		int localPtr = hashTable[entryDestId].ptr;
+		ITMHashSwapState &swapState = swapStates[entryDestId];
+
+		if (swapState.state == 2 && localPtr >= 0 && entriesVisibleType[entryDestId] == 0)
+```
+
+然后将满足条件的块存回host，值得注意的一点是这一步先存回缓冲区syncedVoxelBlock（不直接存host）
+
+```
+			TVoxel *localVBALocation = localVBA + localPtr * SDF_BLOCK_SIZE3;
+
+			neededEntryIDs_local[noNeededEntries] = entryDestId;
+
+			hasSyncedData_local[noNeededEntries] = true;
+			memcpy(syncedVoxelBlocks_local + noNeededEntries * SDF_BLOCK_SIZE3, localVBALocation, SDF_BLOCK_SIZE3 * sizeof(TVoxel));
+
+			swapStates[entryDestId].state = 0;
+```
+
+然后将被存回的块的每一个体素替换为新的未初始化的体素，每一个块存回host（暂时是缓冲区)以后，这个local的块就变得空闲，然后将noAllocatedVoxelEntries加1，表示空闲的块的数量，voxelAllocationList[vbaIdx + 1] = localPtr则记录空闲的块对应local memory的位置，以便随后分配新的块。
+
+```
+int vbaIdx = noAllocatedVoxelEntries;
+if (vbaIdx < SDF_BUCKET_NUM - 1)
+{
+    noAllocatedVoxelEntries++;
+    voxelAllocationList[vbaIdx + 1] = localPtr;
+    hashTable[entryDestId].ptr = -1;
+
+    for (int i = 0; i < SDF_BLOCK_SIZE3; i++) localVBALocation[i] = TVoxel();
+}
+```
+
+
+
+### idx：5
+
+#### ITMLib->Engines->Swapping->Shared->ITMSwappingEngine_CPU.tpp
+
+#### CleanLocalMemory（）
+
+用途：和idx4一样，但是这个是将所有的local都清空了。
+
+```
+template<class TVoxel>
+void ITMSwappingEngine_CPU<TVoxel, ITMVoxelBlockHash>::CleanLocalMemory(ITMScene<TVoxel, ITMVoxelBlockHash> *scene, ITMRenderState *renderState)
+```
+
+
+
+## Tracker（Depth Tracker）
+
+Depth Tracker用来通过深度图信息判断位姿，通过使用列文伯格马夸尔特方法进行非线性优化。
+
+具体的思路是：
+
+
+
+![image-20210530192330785](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210530193209.png)
+
+这里使用了ICP方法（ICP还没仔细看）大概通俗的解释是：
+
+由于使用TSDF方式进行三维建模，TSDF的思路是预想一个物体的形状，然后不断地将其修正为真实的形状，因此需要有一个观念就是我们使用TSDF维护的三维模型就是最真实的，无论是否真的真实，也将其当作真实值作为参照。
+
+在InfiniTAM中，Depth Tracker需要以下几种信息
+
+1. TSDF模型
+2. 上一次迭代生成的深度图（认为是真实的）*（具体是怎么生成的还需要解决）*
+3. 预估的相机位姿
+
+然后我们通过建立一个最优化问题，优化的是相机位姿，方式为：
+
+首先通过将深度图上的2D点
+
+![image-20210530193201886](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210530193204.png)
+
+通过相机内参配合深度信息投影为相机坐标系下的3D点P(x),然后使用估计的R和t将其转为世界坐标系下的3D点，
+
+接着通过Raycasting*（这个需要进一步研究）*将相片上的点投影到TSDF模型上，如果射线和TSDF模型的表面相交（找到zero-crossing），就找到了点P^{-},这个过程应该是N（）映射在起作用，而P^{-}实际上应该是P重新反投影到相机平面，通过Raycasting形成的（这里我猜是为了强调P这个3D点才有了P^{-}和P，直接用2D的点x也可以直接表示）
+
+![image-20210530192315731](https://raw.githubusercontent.com/zjnyly/blog/main/img/20210530192317.png)
+
+最后就是求解出最好的R和t，使得这个能量函数能化为最小，方式为
+
+raycasting得到的点和使用R和t估计的点的距离点乘TSDF上该点的法线，乘以法线应该是为了保证数据的归一化。
+
+### idx： 6
+
+#### ITMLib->Trackers->Interface->ITMDepthTracker.cpp
+
+#### TrackCamera（）
+
+用途：用于更新R和t
+
+```
+void ITMDepthTracker::TrackCamera(ITMTrackingState *trackingState, const ITMView *view)
+```
+
+重点是使用这一步计算一共有多少个可以用来优化的点的同时，计算这些点的Hessian矩阵的nabla算子（参见idx7）
+
+
 
