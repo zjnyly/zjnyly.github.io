@@ -12,7 +12,7 @@
   <header class="site-header">
     <div class="page">
       <a class="site-name" href="#top">Jianing Zheng</a>
-      <nav><a href="#research">Research</a><a href="#publications">Publications</a><a href="#projects">Projects</a><a href="#contact">Contact</a></nav>
+      <nav><a href="#research">研究 / Research</a><a href="#publications">论文 / Publications</a><a href="#projects">项目 / Projects</a><a href="#contact">联系 / Contact</a></nav>
     </div>
   </header>
   <main class="page layout" id="top">
@@ -20,48 +20,48 @@
       <img src="assets/avatar.png" alt="郑佳宁">
       <h1>郑佳宁</h1>
       <p class="name-en">Jianing Zheng</p>
-      <p class="affiliation">Ph.D. Student<br>School of Computer Science and Engineering<br>Sun Yat-sen University</p>
-      <p class="profile-note">硕博连读 · 广州，中国</p>
-      <div class="profile-links"><a href="mailto:zhengjn8@mail2.sysu.edu.cn">Email</a><a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a><a href="https://zjnyly.github.io/" target="_blank" rel="noreferrer">Homepage</a></div>
+      <p class="affiliation">博士研究生（硕博连读）<br>计算机科学与技术学院<br>中山大学<br><span class="en">Ph.D. Student · School of Computer Science and Engineering<br>Sun Yat-sen University</span></p>
+      <p class="profile-note">广州，中国 · Guangzhou, China</p>
+      <div class="profile-links"><a href="mailto:zhengjn8@mail2.sysu.edu.cn">邮箱 / Email</a><a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a><a href="https://zjnyly.github.io/" target="_blank" rel="noreferrer">主页 / Home</a></div>
     </aside>
     <div class="content">
       <section class="intro">
-        <p class="section-label">About</p>
-        <p class="bio">我是中山大学计算机科学博士研究生（硕博连读）。我的研究兴趣位于大语言模型、计算机体系结构与硬件加速的交叉地带，关注如何构建高效、可扩展且面向真实部署的模型推理系统。</p>
-        <p class="bio">目前主要研究大语言模型推理加速、稀疏 Attention、长上下文推理、FPGA 加速器架构，以及模型—系统—硬件协同设计。</p>
+        <p class="section-label">关于 / About</p>
+        <p class="bio">我是中山大学计算机科学博士研究生（硕博连读）。我的研究兴趣位于大语言模型、计算机体系结构与硬件加速的交叉地带，关注如何构建高效、可扩展且面向真实部署的模型推理系统。<span class="en">I am a Ph.D. student at Sun Yat-sen University. My research lies at the intersection of large language models, computer architecture, and hardware acceleration, with a focus on efficient and scalable inference systems for real-world deployment.</span></p>
+        <p class="bio">目前主要研究大语言模型推理加速、稀疏 Attention、长上下文推理、FPGA 加速器架构，以及模型—系统—硬件协同设计。<span class="en">My interests include LLM inference acceleration, sparse attention, long-context inference, FPGA accelerator architecture, and model–system–hardware co-design.</span></p>
       </section>
       <section id="research">
-        <p class="section-label">Research interests</p>
+        <p class="section-label">研究方向 / Research interests</p>
         <div class="interest-list">
-          <div><b>Large Language Model Systems</b><span>Inference serving · KV Cache · Long-context decoding</span></div>
-          <div><b>Efficient Attention</b><span>Sparse attention · Memory-side computing · CPU–GPU collaboration</span></div>
-          <div><b>Computer Architecture</b><span>FPGA accelerators · HLS · Hardware–software co-design</span></div>
+          <div><b>大语言模型系统<br><span class="en">Large Language Model Systems</span></b><span>推理服务 · KV Cache · 长上下文解码<br><span class="en">Inference serving · KV Cache · Long-context decoding</span></span></div>
+          <div><b>高效 Attention<br><span class="en">Efficient Attention</span></b><span>稀疏 Attention · 存算协同 · CPU–GPU 协作<br><span class="en">Sparse attention · Memory-side computing · CPU–GPU collaboration</span></span></div>
+          <div><b>计算机体系结构<br><span class="en">Computer Architecture</span></b><span>FPGA 加速器 · HLS · 软硬件协同设计<br><span class="en">FPGA accelerators · HLS · Hardware–software co-design</span></span></div>
         </div>
       </section>
       <section id="projects">
-        <p class="section-label">Selected projects</p>
-        <article class="project"><h2>面向大语言模型高效推理的加速器设计 <small>Terafly</small></h2><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。</p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。</p></article>
-        <article class="project"><h2>面向 1M Token 长上下文的存算侧 Attention 加速器设计 <small>RheoAttention</small></h2><p>设计解耦式 Memory-Side Attention 架构与 Cascaded Attention 三级空间流水，使片上 Attention 状态与上下文长度无关；FPGA 原型达到 <strong>99.42%</strong> INT2 输入带宽利用率和 <strong>99.94%</strong> DDR 带宽利用率。</p></article>
-        <article class="project"><h2>面向长程推理的 CPU–GPU 协同稀疏 Attention 推理系统 <small>RheoServe</small></h2><p>提出 Logical KV Cache、Compute Offload 与 Adaptive Block Migration，将 Host Memory 扩展为 Attention 执行层；在 RTX 3090 上 Qwen3-4B / 8B 峰值吞吐达到 <strong>236.5 / 137.2 tok/s</strong>，最高达到 <strong>2.13×</strong> 加速。</p></article>
-        <article class="project"><h2>面向端侧小语言模型的细粒度结构化稀疏加速 <small>RheoSparse</small></h2><p>提出支持任意 N:64 模式的结构化稀疏推理框架与 Bitmask SpMV Kernel；在 <strong>50%</strong> 稀疏率下平均准确率最高提升 <strong>4.80</strong> 个百分点，Decode 延迟最高降低 <strong>61.3% / 49.6%</strong>。</p></article>
+        <p class="section-label">精选项目 / Selected projects</p>
+        <article class="project"><h2>面向大语言模型高效推理的加速器设计 <small>Terafly</small><span class="en">Efficient Accelerator Design for LLM Inference</span></h2><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。<span class="en">Proposed a hybrid spatial–temporal architecture to address compute under-utilization during autoregressive decoding and the limited scalability of a single accelerator node.</span></p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。<span class="en">Built an HLS-based template generation framework for one-click code generation, parallel scaling, ring networking, and automatic placement and routing. Achieved <strong>1.1×</strong> GPU TPS, <strong>3.4×</strong> energy efficiency, and a <strong>50%</strong> throughput gain at equal resource usage.</span></p></article>
+        <article class="project"><h2>面向 1M Token 长上下文的存算侧 Attention 加速器设计 <small>RheoAttention</small><span class="en">Memory-Side Attention Acceleration for 1M-Token Contexts</span></h2><p>设计解耦式 Memory-Side Attention 架构与 Cascaded Attention 三级空间流水，使片上 Attention 状态与上下文长度无关；FPGA 原型达到 <strong>99.42%</strong> INT2 输入带宽利用率和 <strong>99.94%</strong> DDR 带宽利用率。<span class="en">Designed a decoupled memory-side attention architecture and a three-stage cascaded spatial pipeline, achieving <strong>99.42%</strong> INT2 input-bandwidth utilization and <strong>99.94%</strong> DDR-bandwidth utilization on FPGA.</span></p></article>
+        <article class="project"><h2>面向长程推理的 CPU–GPU 协同稀疏 Attention 推理系统 <small>RheoServe</small><span class="en">CPU–GPU Collaborative Sparse Attention for Long-Context Inference</span></h2><p>提出 Logical KV Cache、Compute Offload 与 Adaptive Block Migration，将 Host Memory 扩展为 Attention 执行层；在 RTX 3090 上 Qwen3-4B / 8B 峰值吞吐达到 <strong>236.5 / 137.2 tok/s</strong>，最高达到 <strong>2.13×</strong> 加速。<span class="en">Extended host memory into an attention execution layer with Logical KV Cache, Compute Offload, and Adaptive Block Migration. Reached <strong>236.5 / 137.2 tok/s</strong> on Qwen3-4B / 8B and up to <strong>2.13×</strong> speedup on an RTX 3090.</span></p></article>
+        <article class="project"><h2>面向端侧小语言模型的细粒度结构化稀疏加速 <small>RheoSparse</small><span class="en">Fine-Grained Structured Sparsity for Small Language Models</span></h2><p>提出支持任意 N:64 模式的结构化稀疏推理框架与 Bitmask SpMV Kernel；在 <strong>50%</strong> 稀疏率下平均准确率最高提升 <strong>4.80</strong> 个百分点，Decode 延迟最高降低 <strong>61.3% / 49.6%</strong>。<span class="en">Developed an arbitrary N:64 structured-sparsity framework and Bitmask SpMV kernel, improving average accuracy by up to <strong>4.80</strong> points at <strong>50%</strong> sparsity and reducing decode latency by up to <strong>61.3% / 49.6%</strong>.</span></p></article>
       </section>
       <section id="publications">
-        <p class="section-label">Selected publications</p>
+        <p class="section-label">代表性论文 / Selected publications</p>
         <ol class="publication-list">
-          <li><b>RheoAttention:</b> A Scalable Memory-Side Engine for Sparse and Quantized Million-Token Attention <span>AAAI · Under Review</span></li>
-          <li><b>RheoServe:</b> CPU-GPU Collaborative Sparse Attention for Efficient LLM Decoding <span>AAAI · Under Review</span></li>
-          <li><b>RheoSparse:</b> Exploring Finer Grained Structured Sparsity for Small Language Models <span>DATE 2026 · CCF-B</span></li>
+          <li><b>RheoAttention:</b> A Scalable Memory-Side Engine for Sparse and Quantized Million-Token Attention <span>AAAI · 在投 / Under Review</span></li>
+          <li><b>RheoServe:</b> CPU-GPU Collaborative Sparse Attention for Efficient LLM Decoding <span>AAAI · 在投 / Under Review</span></li>
+          <li><b>RheoSparse:</b> Exploring Finer Grained Structured Sparsity for Small Language Models <span>DATE 2026 · CCF-B · EDA 领域四大顶级会议之一 / One of the four major EDA conferences</span></li>
           <li><b>Terafly:</b> A Multinode FPGA-Based Accelerator Design for Efficient Cooperative Inference in LLMs <span>IEEE TCAD 2026 · CCF-A</span></li>
           <li><b>LoopLynx:</b> A Scalable Dataflow Architecture for Efficient LLM Inference <span>DATE 2025 · CCF-B</span></li>
         </ol>
       </section>
       <section class="education">
-        <p class="section-label">Education</p>
+        <p class="section-label">教育背景 / Education</p>
         <div class="edu-row"><b>Sun Yat-sen University</b><span>Ph.D. in Computer Science · 2025–present</span></div>
         <div class="edu-row"><b>Sun Yat-sen University</b><span>M.S. in Computer Science and Technology · 2023–2025</span></div>
         <div class="edu-row"><b>Sun Yat-sen University</b><span>B.S. in Computer Science and Technology · 2019–2023 · Recommended for admission</span></div>
       </section>
-      <footer id="contact"><p>Last updated September 2026</p><p><a href="mailto:zhengjn8@mail2.sysu.edu.cn">zhengjn8@mail2.sysu.edu.cn</a> · <a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a></p></footer>
+      <footer id="contact"><p>最后更新：2026 年 9 月 / Last updated: September 2026</p><p><a href="mailto:zhengjn8@mail2.sysu.edu.cn">邮箱 / Email</a> · <a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a></p></footer>
     </div>
   </main>
 </body>
