@@ -40,7 +40,7 @@
       </section>
       <section id="projects">
         <p class="section-label">Selected projects</p>
-        <article class="project"><h2>面向大语言模型高效推理的加速器设计 <small>Terafly · LoopLynx</small></h2><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。</p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。</p></article>
+        <article class="project"><h2>面向大语言模型高效推理的加速器设计 <small>Terafly</small></h2><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。</p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。</p></article>
         <article class="project"><h2>面向 1M Token 长上下文的存算侧 Attention 加速器设计 <small>RheoAttention</small></h2><p>设计解耦式 Memory-Side Attention 架构与 Cascaded Attention 三级空间流水，使片上 Attention 状态与上下文长度无关；FPGA 原型达到 <strong>99.42%</strong> INT2 输入带宽利用率和 <strong>99.94%</strong> DDR 带宽利用率。</p></article>
         <article class="project"><h2>面向长程推理的 CPU–GPU 协同稀疏 Attention 推理系统 <small>RheoServe</small></h2><p>提出 Logical KV Cache、Compute Offload 与 Adaptive Block Migration，将 Host Memory 扩展为 Attention 执行层；在 RTX 3090 上 Qwen3-4B / 8B 峰值吞吐达到 <strong>236.5 / 137.2 tok/s</strong>，最高达到 <strong>2.13×</strong> 加速。</p></article>
         <article class="project"><h2>面向端侧小语言模型的细粒度结构化稀疏加速 <small>RheoSparse</small></h2><p>提出支持任意 N:64 模式的结构化稀疏推理框架与 Bitmask SpMV Kernel；在 <strong>50%</strong> 稀疏率下平均准确率最高提升 <strong>4.80</strong> 个百分点，Decode 延迟最高降低 <strong>61.3% / 49.6%</strong>。</p></article>
