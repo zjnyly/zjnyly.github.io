@@ -62,22 +62,22 @@
       </div>
 
       <article class="project-card">
-        <figure class="project-visual"><img src="assets/figures/terafly-layout.webp?v=6" alt="Terafly FPGA placement and routing"><figcaption>FPGA placement & routing</figcaption></figure>
+        <figure class="project-visual"><img src="assets/figures/terafly-layout.webp?v=6" alt="Terafly FPGA placement and routing"></figure>
         <div class="project-copy"><p class="project-no">PROJECT 01 · TERAFLY</p><h3>面向大语言模型高效推理的加速器设计</h3><p class="project-en">Efficient Accelerator Design for LLM Inference</p><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。</p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。</p></div>
       </article>
 
       <article class="project-card">
-        <figure class="project-visual"><img src="assets/figures/rheoattention-method.webp?v=6" alt="RheoAttention method overview"><figcaption>Memory-side Attention architecture</figcaption></figure>
+        <figure class="project-visual"><img src="assets/figures/rheoattention-method.webp?v=6" alt="RheoAttention method overview"></figure>
         <div class="project-copy"><p class="project-no">PROJECT 02 · RHEOATTENTION</p><h3>面向 1M Token 长上下文的存算侧 Attention 加速器设计</h3><p class="project-en">Memory-Side Attention Acceleration for 1M-Token Contexts</p><p>设计解耦式 Memory-Side Attention 架构与 Cascaded Attention 三级空间流水，使片上 Attention 状态与上下文长度无关；FPGA 原型达到 <strong>99.42%</strong> INT2 输入带宽利用率和 <strong>99.94%</strong> DDR 带宽利用率。</p></div>
       </article>
 
       <article class="project-card">
-        <figure class="project-visual"><img src="assets/figures/rheoserve-method.webp?v=6" alt="RheoServe method overview"><figcaption>CPU–GPU collaborative serving</figcaption></figure>
+        <figure class="project-visual"><img src="assets/figures/rheoserve-method.webp?v=6" alt="RheoServe method overview"></figure>
         <div class="project-copy"><p class="project-no">PROJECT 03 · RHEOSERVE</p><h3>面向长程推理的 CPU–GPU 协同稀疏 Attention 推理系统</h3><p class="project-en">CPU–GPU Collaborative Sparse Attention for Long-Context Inference</p><p>提出 Logical KV Cache、Compute Offload 与 Adaptive Block Migration，将 Host Memory 扩展为 Attention 执行层；在 RTX 3090 上 Qwen3-4B / 8B 峰值吞吐达到 <strong>236.5 / 137.2 tok/s</strong>，最高达到 <strong>2.13×</strong> 加速。</p></div>
       </article>
 
       <article class="project-card">
-        <figure class="project-visual"><img src="assets/figures/rheosparse-thread.png?v=6" alt="RheoSparse GPU thread scheduling and memory layout"><figcaption>GPU threads & memory organization</figcaption></figure>
+        <figure class="project-visual rheosparse-visual"><img src="assets/figures/rheosparse-thread.png?v=7" alt="RheoSparse GPU thread scheduling and memory layout"></figure>
         <div class="project-copy"><p class="project-no">PROJECT 04 · RHEOSPARSE</p><h3>面向端侧小语言模型的细粒度结构化稀疏加速</h3><p class="project-en">Fine-Grained Structured Sparsity for Small Language Models</p><p>提出支持任意 N:64 模式的结构化稀疏推理框架与 Bitmask SpMV Kernel；在 <strong>50%</strong> 稀疏率下平均准确率最高提升 <strong>4.80</strong> 个百分点，Decode 延迟最高降低 <strong>61.3% / 49.6%</strong>。</p></div>
       </article>
     </section>
