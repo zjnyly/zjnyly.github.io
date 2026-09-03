@@ -18,8 +18,8 @@ a { color: inherit; }
 .site-header nav { display: flex; gap: 26px; }
 .site-header nav a { color: var(--muted); font-size: 13px; text-decoration: none; }
 .site-header nav a:hover, .profile-links a:hover, footer a:hover { color: var(--blue); }
-.layout { display: grid; grid-template-columns: 235px 1fr; gap: 72px; padding-top: 64px; }
-.profile { font-family: Arial, "Noto Sans SC", sans-serif; }
+.layout { display: block; max-width: 920px; padding-top: 54px; }
+.profile { margin-bottom: 58px; font-family: Arial, "Noto Sans SC", sans-serif; }
 .profile img { display: block; width: 150px; height: 186px; object-fit: cover; margin-bottom: 24px; filter: saturate(.78); }
 .profile h1 { margin: 0; color: var(--blue); font-family: Georgia, "Noto Serif SC", serif; font-size: 30px; line-height: 1.2; font-weight: 700; }
 .name-en { margin: 4px 0 23px; color: var(--muted); font-family: Georgia, serif; font-size: 16px; }
@@ -27,7 +27,7 @@ a { color: inherit; }
 .profile-note { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
 .profile-links { display: flex; flex-wrap: wrap; gap: 9px 16px; }
 .profile-links a { color: var(--blue); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
-.content { max-width: 810px; }
+.content { max-width: 920px; }
 .content section { margin-bottom: 67px; }
 .section-label { margin: 0 0 17px; color: var(--blue); font: 700 12px/1.2 Arial, "Noto Sans SC", sans-serif; letter-spacing: .13em; text-transform: uppercase; }
 .bio { max-width: 780px; margin: 0 0 14px; font-size: 18px; line-height: 1.85; }
@@ -43,9 +43,9 @@ a { color: inherit; }
 .project p { margin: 0 0 10px; font-size: 16px; line-height: 1.82; }
 .project p:last-child { margin-bottom: 0; }
 .project strong { color: var(--blue); font-weight: 700; }
-.project-with-figure { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 32px; }
+.project-with-figure { display: block; }
 .project-with-figure figure { margin: 4px 0 0; }
-.project-with-figure figure img { display: block; width: 100%; max-height: 270px; object-fit: contain; border: 1px solid var(--line); background: var(--soft); padding: 6px; }
+.project-with-figure figure img { display: block; width: min(100%, 720px); max-height: 310px; margin: 0 auto; object-fit: contain; border: 1px solid var(--line); background: var(--soft); padding: 6px; }
 .project-with-figure figcaption { margin-top: 7px; color: var(--muted); font: 11px Arial, sans-serif; text-align: center; }
 .publication-list { margin: 0; padding: 0; list-style: none; counter-reset: papers; }
 .publication-list li { position: relative; padding: 0 0 19px 38px; margin: 0 0 19px; border-bottom: 1px solid var(--line); font-size: 16px; line-height: 1.65; counter-increment: papers; }
