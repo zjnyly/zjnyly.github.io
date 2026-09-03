@@ -3,62 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="郑佳宁的个人主页：大语言模型系统、稀疏注意力与 FPGA 加速。">
+  <meta name="description" content="Jianing Zheng — PhD student at Sun Yat-sen University. Research in LLM systems, attention acceleration and FPGA architecture.">
   <link rel="canonical" href="https://zjnyly.github.io/">
-  <title>郑佳宁 · Jianing Zheng</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>Jianing Zheng</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="nav shell">
-    <a class="brand" href="#top">JZ<span>.</span></a>
-    <nav aria-label="主导航"><a href="#research">研究</a><a href="#papers">论文</a><a href="#about">关于</a></nav>
-    <a class="nav-link" href="https://zjnyly.github.io/" target="_blank" rel="noreferrer">Live site ↗</a>
+  <header class="site-header">
+    <div class="page">
+      <a class="site-name" href="#top">Jianing Zheng</a>
+      <nav><a href="#research">Research</a><a href="#publications">Publications</a><a href="#projects">Projects</a><a href="#contact">Contact</a></nav>
+    </div>
   </header>
-
-  <main id="top">
-    <section class="hero shell">
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="live-dot"></span> PhD researcher · Sun Yat-sen University</p>
-        <h1>让模型更快，<br><em>让智能更近。</em></h1>
-        <p class="lede">我是郑佳宁，专注于大语言模型推理系统、稀疏注意力与 FPGA 加速器设计，探索从算法到硬件的高效协同。</p>
-        <div class="hero-actions"><a class="button button-dark" href="#research">探索研究 <span>↓</span></a><a class="text-link" href="mailto:zhengjn8@mail2.sysu.edu.cn">联系我 ↗</a></div>
-      </div>
-      <div class="hero-visual">
-        <div class="portrait-wrap"><img src="assets/avatar.png" alt="郑佳宁头像"><span class="portrait-label">JIANING<br>ZHENG</span></div>
-        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
-        <div class="visual-note note-top">SYSTEMS<br>+ HARDWARE</div>
-        <div class="visual-note note-bottom">GUANGZHOU<br>23°N · 113°E</div>
-      </div>
-    </section>
-
-    <section class="signal-bar"><div class="shell signal-inner"><span>RESEARCH SIGNAL</span><span class="signal-line"></span><span>LLM SYSTEMS&nbsp;&nbsp; / &nbsp;&nbsp;ACCELERATION&nbsp;&nbsp; / &nbsp;&nbsp;SPARSITY</span></div></section>
-
-    <section id="research" class="section shell">
-      <div class="section-heading"><p class="kicker">01 / RESEARCH</p><h2>把复杂问题，<br><span>变成可运行的系统。</span></h2></div>
-      <div class="research-grid">
-        <article class="research-card card-blue"><div class="card-icon">↗</div><p class="card-index">01 — ARCHITECTURE</p><h3>混合时空<br>加速架构</h3><p>以空间架构的吞吐和时间架构的复用，应对 LLM Prefill / Decode 的不同计算模式。</p><span class="card-foot">Terafly · LoopLynx</span></article>
-        <article class="research-card card-cream"><div class="card-icon">◌</div><p class="card-index">02 — ATTENTION</p><h3>可扩展的<br>稀疏 Attention</h3><p>从 1M Token 长上下文到 CPU–GPU 协同，让 KV Cache 不再受限于单一存储层。</p><span class="card-foot">RheoAttention · RheoServe</span></article>
-        <article class="research-card card-red"><div class="card-icon">✦</div><p class="card-index">03 — EFFICIENCY</p><h3>细粒度<br>结构化稀疏</h3><p>面向端侧小语言模型，探索任意 N:64 稀疏模式与高效 GPU Kernel。</p><span class="card-foot">RheoSparse</span></article>
-      </div>
-    </section>
-
-    <section class="metrics"><div class="shell metrics-grid"><div><strong>1M</strong><span>Token context</span></div><div><strong>3.4×</strong><span>Energy efficiency</span></div><div><strong>50%</strong><span>Throughput gain</span></div><div><strong>2.13×</strong><span>Peak acceleration</span></div></div></section>
-
-    <section id="papers" class="section shell papers-section">
-      <div class="section-heading paper-heading"><div><p class="kicker">02 / SELECTED WORKS</p><h2>代表性论文</h2></div><a class="text-link" href="https://scholar.google.com" target="_blank" rel="noreferrer">Scholar ↗</a></div>
-      <div class="paper-list">
-        <div class="paper-row"><span class="paper-no">01</span><span class="paper-main"><b>RheoAttention</b><span>A Scalable Memory-Side Engine for Sparse and Quantized Million-Token Attention</span></span><span class="paper-meta">AAAI · UNDER REVIEW</span></div>
-        <div class="paper-row"><span class="paper-no">02</span><span class="paper-main"><b>RheoServe</b><span>CPU-GPU Collaborative Sparse Attention for Efficient LLM Decoding</span></span><span class="paper-meta">AAAI · UNDER REVIEW</span></div>
-        <div class="paper-row"><span class="paper-no">03</span><span class="paper-main"><b>RheoSparse</b><span>Exploring Finer Grained Structured Sparsity for Small Language Models</span></span><span class="paper-meta">DATE 2026 · CCF-B</span></div>
-        <div class="paper-row"><span class="paper-no">04</span><span class="paper-main"><b>Terafly</b><span>A Multinode FPGA-Based Accelerator Design for Efficient Cooperative Inference in LLMs</span></span><span class="paper-meta">IEEE TCAD 2026 · CCF-A</span></div>
-      </div>
-    </section>
-
-    <section id="about" class="about-section"><div class="shell about-grid"><div><p class="kicker">03 / ABOUT</p><h2>研究之外，<br><em>保持好奇。</em></h2></div><div class="about-copy"><p>目前就读于中山大学计算机科学博士阶段（硕博连读）。本科期间保送，持续在模型系统、计算机体系结构和硬件加速的交叉地带工作。</p><div class="about-facts"><div><span>EDUCATION</span><b>SYSU · PhD</b></div><div><span>LOCATION</span><b>Guangzhou, China</b></div><div><span>FOCUS</span><b>LLM Systems / FPGA</b></div></div><div class="about-links"><a href="mailto:zhengjn8@mail2.sysu.edu.cn">Email ↗</a><a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub ↗</a></div></div></div></section>
+  <main class="page layout" id="top">
+    <aside class="profile">
+      <img src="assets/avatar.png" alt="郑佳宁">
+      <h1>郑佳宁</h1>
+      <p class="name-en">Jianing Zheng</p>
+      <p class="affiliation">Ph.D. Student<br>School of Computer Science and Engineering<br>Sun Yat-sen University</p>
+      <p class="profile-note">硕博连读 · 广州，中国</p>
+      <div class="profile-links"><a href="mailto:zhengjn8@mail2.sysu.edu.cn">Email</a><a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a><a href="https://zjnyly.github.io/" target="_blank" rel="noreferrer">Homepage</a></div>
+    </aside>
+    <div class="content">
+      <section class="intro">
+        <p class="section-label">About</p>
+        <p class="bio">我是中山大学计算机科学博士研究生（硕博连读）。我的研究兴趣位于大语言模型、计算机体系结构与硬件加速的交叉地带，关注如何构建高效、可扩展且面向真实部署的模型推理系统。</p>
+        <p class="bio">目前主要研究大语言模型推理加速、稀疏 Attention、长上下文推理、FPGA 加速器架构，以及模型—系统—硬件协同设计。</p>
+      </section>
+      <section id="research">
+        <p class="section-label">Research interests</p>
+        <div class="interest-list">
+          <div><b>Large Language Model Systems</b><span>Inference serving · KV Cache · Long-context decoding</span></div>
+          <div><b>Efficient Attention</b><span>Sparse attention · Memory-side computing · CPU–GPU collaboration</span></div>
+          <div><b>Computer Architecture</b><span>FPGA accelerators · HLS · Hardware–software co-design</span></div>
+        </div>
+      </section>
+      <section id="projects">
+        <p class="section-label">Selected projects</p>
+        <article class="project"><h2>面向大语言模型高效推理的加速器设计 <small>Terafly · LoopLynx</small></h2><p>针对自回归解码导致加速器峰值算力欠饱和及单节点缺乏可扩展性的问题，提出混合时空架构，以空间架构提升细粒度吞吐，以时间架构实现计算资源复用。</p><p>设计基于 HLS 的模板化代码生成框架，支持一键生成、并行扩展、环形组网与模块自动布局布线。端侧小模型 TPS 达到 GPU 的 <strong>1.1×</strong>，能耗优势达到 <strong>3.4×</strong>；相同资源下吞吐提升 <strong>50%</strong>。</p></article>
+        <article class="project"><h2>面向 1M Token 长上下文的存算侧 Attention 加速器设计 <small>RheoAttention</small></h2><p>设计解耦式 Memory-Side Attention 架构与 Cascaded Attention 三级空间流水，使片上 Attention 状态与上下文长度无关；FPGA 原型达到 <strong>99.42%</strong> INT2 输入带宽利用率和 <strong>99.94%</strong> DDR 带宽利用率。</p></article>
+        <article class="project"><h2>面向长程推理的 CPU–GPU 协同稀疏 Attention 推理系统 <small>RheoServe</small></h2><p>提出 Logical KV Cache、Compute Offload 与 Adaptive Block Migration，将 Host Memory 扩展为 Attention 执行层；在 RTX 3090 上 Qwen3-4B / 8B 峰值吞吐达到 <strong>236.5 / 137.2 tok/s</strong>，最高达到 <strong>2.13×</strong> 加速。</p></article>
+        <article class="project"><h2>面向端侧小语言模型的细粒度结构化稀疏加速 <small>RheoSparse</small></h2><p>提出支持任意 N:64 模式的结构化稀疏推理框架与 Bitmask SpMV Kernel；在 <strong>50%</strong> 稀疏率下平均准确率最高提升 <strong>4.80</strong> 个百分点，Decode 延迟最高降低 <strong>61.3% / 49.6%</strong>。</p></article>
+      </section>
+      <section id="publications">
+        <p class="section-label">Selected publications</p>
+        <ol class="publication-list">
+          <li><b>RheoAttention:</b> A Scalable Memory-Side Engine for Sparse and Quantized Million-Token Attention <span>AAAI · Under Review</span></li>
+          <li><b>RheoServe:</b> CPU-GPU Collaborative Sparse Attention for Efficient LLM Decoding <span>AAAI · Under Review</span></li>
+          <li><b>RheoSparse:</b> Exploring Finer Grained Structured Sparsity for Small Language Models <span>DATE 2026 · CCF-B</span></li>
+          <li><b>Terafly:</b> A Multinode FPGA-Based Accelerator Design for Efficient Cooperative Inference in LLMs <span>IEEE TCAD 2026 · CCF-A</span></li>
+          <li><b>LoopLynx:</b> A Scalable Dataflow Architecture for Efficient LLM Inference <span>DATE 2025 · CCF-B</span></li>
+        </ol>
+      </section>
+      <section class="education">
+        <p class="section-label">Education</p>
+        <div class="edu-row"><b>Sun Yat-sen University</b><span>Ph.D. in Computer Science · 2025–present</span></div>
+        <div class="edu-row"><b>Sun Yat-sen University</b><span>M.S. in Computer Science and Technology · 2023–2025</span></div>
+        <div class="edu-row"><b>Sun Yat-sen University</b><span>B.S. in Computer Science and Technology · 2019–2023 · Recommended for admission</span></div>
+      </section>
+      <footer id="contact"><p>Last updated September 2026</p><p><a href="mailto:zhengjn8@mail2.sysu.edu.cn">zhengjn8@mail2.sysu.edu.cn</a> · <a href="https://github.com/zjnyly" target="_blank" rel="noreferrer">GitHub</a></p></footer>
+    </div>
   </main>
-  <footer class="shell footer"><span>© 2026 Jianing Zheng</span><span>Built with curiosity &amp; caffeine.</span></footer>
 </body>
 </html>
